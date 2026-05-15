@@ -12,14 +12,14 @@ export default function Home() {
             <div className="flex min-w-0 items-center gap-2.5">
               <Image
                 src="/logo.jpeg"
-                alt="Nepal Motor"
+                alt="NEPAL Motor"
                 width={40}
                 height={40}
                 className="h-10 w-10 shrink-0 rounded-full object-cover"
                 priority
               />
-              <span className="truncate text-base font-bold tracking-tight text-black sm:text-lg">
-                Nepal Motor
+              <span className="truncate text-xl font-bold tracking-tight text-black sm:text-2xl">
+                NEPAL Motor
               </span>
             </div>
             <a
@@ -27,7 +27,7 @@ export default function Home() {
               target="_blank"
               rel="noopener noreferrer"
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-black transition-colors hover:bg-black/5"
-              aria-label="Call Nepal Motor"
+              aria-label="Call NEPAL Motor"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
