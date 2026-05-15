@@ -13,6 +13,7 @@ const TAG_BG = "#E8F4FC";
 const TAG_TEXT = "#0c4a6e";
 
 const CITIES = [
+  "Itahari",
   "Kathmandu",
   "Pokhara",
   "Lalitpur",
@@ -250,6 +251,91 @@ function textInputClass() {
   ].join(" ");
 }
 
+function isImageFile(file: File) {
+  return file.type.startsWith("image/");
+}
+
+function fileExtension(name: string) {
+  const i = name.lastIndexOf(".");
+  return i >= 0 ? name.slice(i + 1).toUpperCase() : "FILE";
+}
+
+type FilePreviewGridProps = {
+  files: File[];
+  onRemove: (index: number) => void;
+};
+
+function FilePreviewGrid({ files, onRemove }: FilePreviewGridProps) {
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+
+  useEffect(() => {
+    const urls = files.map((file) =>
+      isImageFile(file) ? URL.createObjectURL(file) : "",
+    );
+    setPreviewUrls(urls);
+    return () => {
+      urls.forEach((url) => {
+        if (url) URL.revokeObjectURL(url);
+      });
+    };
+  }, [files]);
+
+  if (files.length === 0) return null;
+
+  return (
+    <div
+      className="grid grid-cols-3 gap-2 sm:grid-cols-4"
+      role="list"
+      aria-label="Uploaded file previews"
+    >
+      {files.map((file, index) => {
+        const previewUrl = previewUrls[index];
+        const image = isImageFile(file) && previewUrl;
+
+        return (
+          <div
+            key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+            role="listitem"
+            className="group relative overflow-hidden rounded-md border bg-zinc-50"
+            style={{ borderColor: BORDER }}
+          >
+            {image ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={previewUrl}
+                alt={file.name}
+                className="aspect-square w-full object-cover"
+              />
+            ) : (
+              <div className="flex aspect-square flex-col items-center justify-center gap-1 px-2 text-center">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                  {fileExtension(file.name)}
+                </span>
+                <span className="line-clamp-2 text-[10px] leading-tight text-zinc-600">
+                  {file.name}
+                </span>
+              </div>
+            )}
+            <button
+              type="button"
+              aria-label={`Remove ${file.name}`}
+              className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-sm leading-none text-white opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+              onClick={() => onRemove(index)}
+            >
+              ×
+            </button>
+            {image ? (
+              <p className="truncate border-t bg-white px-1.5 py-1 text-[10px] text-zinc-600">
+                {file.name}
+              </p>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ExchangeToEvForm() {
   const formId = useId();
 
@@ -273,6 +359,9 @@ export function ExchangeToEvForm() {
   const [features, setFeatures] = useState<string[]>([]);
   const [featuresPickerOpen, setFeaturesPickerOpen] = useState(false);
   const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
 
   const docInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -299,12 +388,31 @@ export function ExchangeToEvForm() {
     setFeatures([]);
     setFeaturesPickerOpen(false);
     setNotes("");
+    setSubmitError(null);
+    setSubmitSuccess(null);
     if (docInputRef.current) docInputRef.current.value = "";
     if (photoInputRef.current) photoInputRef.current.value = "";
   }, []);
 
   const addPresetFeature = useCallback((name: string) => {
     setFeatures((f) => (f.includes(name) ? f : [...f, name]));
+  }, []);
+
+  const removeDocFile = useCallback((index: number) => {
+    setDocFiles((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      if (next.length === 0 && docInputRef.current) docInputRef.current.value = "";
+      return next;
+    });
+  }, []);
+
+  const removePhotoFile = useCallback((index: number) => {
+    setPhotoFiles((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      if (next.length === 0 && photoInputRef.current)
+        photoInputRef.current.value = "";
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -317,10 +425,78 @@ export function ExchangeToEvForm() {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [featuresPickerOpen]);
 
-  const onSubmit = (e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Demo: no backend
-    alert("Thanks — this is a demo form with no server yet.");
+    setSubmitError(null);
+    setSubmitSuccess(null);
+
+    if (
+      !fullName.trim() ||
+      !phone.trim() ||
+      !city ||
+      !year.trim() ||
+      !vehicleType ||
+      !model.trim() ||
+      !brand.trim() ||
+      !color ||
+      !km.trim() ||
+      !evBrand ||
+      !finance ||
+      !transmission ||
+      !fuelType
+    ) {
+      setSubmitError("Please fill in all required fields.");
+      return;
+    }
+
+    const body = new FormData();
+    body.append("fullName", fullName.trim());
+    body.append("email", email.trim());
+    body.append("phone", phone.trim());
+    body.append("city", city);
+    body.append("year", year.trim());
+    body.append("vehicleType", vehicleType);
+    body.append("vehicleBrand", brand.trim());
+    body.append("vehicleModel", model.trim());
+    body.append("vehicleColor", color);
+    body.append("kmDriven", km.trim());
+    body.append("evBrand", evBrand);
+    body.append("finance", finance);
+    body.append("transmission", transmission);
+    body.append("accidents", accidents);
+    body.append("fuelType", fuelType);
+    body.append("features", JSON.stringify(features));
+    body.append("notes", notes.trim());
+    for (const file of docFiles) body.append("documents", file);
+    for (const file of photoFiles) body.append("photos", file);
+
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/vehicle-listings", {
+        method: "POST",
+        body,
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        warning?: string;
+      };
+
+      if (!res.ok) {
+        setSubmitError(data.error ?? "Submission failed. Please try again.");
+        return;
+      }
+
+      const message =
+        data.warning ??
+        "Thank you! Your exchange request has been submitted.";
+      clear();
+      setSubmitSuccess(message);
+    } catch {
+      setSubmitError("Network error. Please check your connection and try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const fieldGap = "flex flex-col gap-7";
@@ -491,11 +667,7 @@ export function ExchangeToEvForm() {
             }
           />
         </label>
-        {docFiles.length > 0 ? (
-          <p className="text-[12px] text-zinc-500">
-            {docFiles.map((f) => f.name).join(", ")}
-          </p>
-        ) : null}
+        <FilePreviewGrid files={docFiles} onRemove={removeDocFile} />
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -530,21 +702,8 @@ export function ExchangeToEvForm() {
             }
           />
         </label>
-        {photoFiles.length > 0 ? (
-          <p className="text-[12px] text-zinc-500">
-            {photoFiles.map((f) => f.name).join(", ")}
-          </p>
-        ) : null}
+        <FilePreviewGrid files={photoFiles} onRemove={removePhotoFile} />
       </div>
-
-      <PillSelect
-        id={`${formId}-ev`}
-        label="Interested EV Brand"
-        required
-        options={EV_BRANDS}
-        value={evBrand}
-        onChange={setEvBrand}
-      />
 
       <PillSelect
         id={`${formId}-fin`}
@@ -655,6 +814,15 @@ export function ExchangeToEvForm() {
         </div>
       </div>
 
+      <PillSelect
+        id={`${formId}-ev`}
+        label="Interested EV Brand"
+        required
+        options={EV_BRANDS}
+        value={evBrand}
+        onChange={setEvBrand}
+      />
+
       <div className="flex flex-col gap-1.5">
         <label htmlFor={`${formId}-notes`} className="text-[13px] text-black">
           Notes
@@ -669,20 +837,39 @@ export function ExchangeToEvForm() {
         />
       </div>
 
+      {submitError ? (
+        <p
+          role="alert"
+          className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-800"
+        >
+          {submitError}
+        </p>
+      ) : null}
+      {submitSuccess ? (
+        <p
+          role="status"
+          className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-[13px] text-green-800"
+        >
+          {submitSuccess}
+        </p>
+      ) : null}
+
       <div className="flex items-center justify-between pt-2">
         <button
           type="button"
           onClick={clear}
-          className="inline-flex items-center gap-1.5 text-[14px] text-blue-600 hover:underline"
+          disabled={submitting}
+          className="inline-flex items-center gap-1.5 text-[14px] text-blue-600 hover:underline disabled:opacity-50"
         >
           <ResetIcon className="text-blue-600" />
           Clear form
         </button>
         <button
           type="submit"
-          className="rounded-md bg-black px-5 py-2 text-[13px] font-semibold text-white hover:bg-zinc-800"
+          disabled={submitting}
+          className="rounded-md bg-black px-5 py-2 text-[13px] font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
         >
-          Submit
+          {submitting ? "Submitting…" : "Submit"}
         </button>
       </div>
 

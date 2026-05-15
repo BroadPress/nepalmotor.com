@@ -1,10 +1,4 @@
-import type { Metadata } from "next";
 import { ExchangeToEvForm } from "./ExchangeToEvForm";
-
-export const metadata: Metadata = {
-  title: "Exchange to EV | NepalMotor",
-  description: "Trade in your vehicle for an electric vehicle.",
-};
 
 export default function Home() {
   return (
