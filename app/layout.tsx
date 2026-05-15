@@ -15,6 +15,11 @@ const siteDescription =
 export const metadata: Metadata = {
   title: siteTitle,
   description: siteDescription,
+  icons: {
+    icon: "/logo.jpeg",
+    shortcut: "/logo.jpeg",
+    apple: "/logo.jpeg",
+  },
   openGraph: {
     title: siteTitle,
     description: siteDescription,
