@@ -112,8 +112,12 @@ export async function resolveTableTarget(): Promise<TableTarget> {
 
   if (!table) {
     const available = tables.map((t) => `"${t.name}"`).join(", ") || "(none)";
+    const looksLikeBaseId = /^app[a-zA-Z0-9]+$/i.test(tableName);
+    const hint = looksLikeBaseId
+      ? ' AIRTABLE_TABLE_NAME looks like a base id (app…)—set it to "Vehicle Listings" or remove it from Vercel env vars.'
+      : "";
     throw new Error(
-      `Airtable table "${tableName}" was not found in this base. Available tables: ${available}. Ask your senior to create or rename the table to "${tableName}".`,
+      `Airtable table "${tableName}" was not found in this base. Available tables: ${available}.${hint}`,
     );
   }
 

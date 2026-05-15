@@ -11,12 +11,47 @@ function readEnv(...keys: string[]): string | undefined {
   return undefined;
 }
 
+function looksLikeBaseId(value: string): boolean {
+  return /^app[a-zA-Z0-9]+$/i.test(value.trim());
+}
+
 function normalizeBaseId(value: string): string {
   const fromUrl = value.match(/airtable\.com\/(app[a-zA-Z0-9]+)/i);
   if (fromUrl) return fromUrl[1];
   const appOnly = value.match(/^(app[a-zA-Z0-9]+)/i);
   if (appOnly) return appOnly[1];
   return value.trim();
+}
+
+/** Fix swapped or duplicated base id / table name in env vars. */
+function resolveBaseAndTable(): { baseId?: string; tableName: string } {
+  const baseRaw = readEnv("AIRTABLE_BASE_ID", "AIRTABLE_BASE");
+  const tableRaw = readEnv("AIRTABLE_TABLE_NAME");
+
+  const baseFromVar = baseRaw ? normalizeBaseId(baseRaw) : undefined;
+  const baseIsValid = Boolean(baseFromVar && looksLikeBaseId(baseFromVar));
+  const tableIsBaseId = Boolean(tableRaw && looksLikeBaseId(tableRaw));
+  const baseIsTableName = Boolean(baseRaw && !looksLikeBaseId(normalizeBaseId(baseRaw)));
+
+  if (tableIsBaseId && baseIsTableName && tableRaw && baseRaw) {
+    return {
+      baseId: normalizeBaseId(tableRaw),
+      tableName: baseRaw.trim(),
+    };
+  }
+
+  if (tableIsBaseId && tableRaw) {
+    return {
+      baseId: baseIsValid ? baseFromVar : normalizeBaseId(tableRaw),
+      tableName:
+        baseIsTableName && baseRaw ? baseRaw.trim() : DEFAULT_TABLE_NAME,
+    };
+  }
+
+  return {
+    baseId: baseFromVar,
+    tableName: tableRaw?.trim() || DEFAULT_TABLE_NAME,
+  };
 }
 
 export type AirtableEnvConfig = {
@@ -36,9 +71,7 @@ export function getAirtableEnv(): AirtableEnvStatus {
     "AIRTABLE_PAT",
     "AIRTABLE_PERSONAL_ACCESS_TOKEN",
   );
-  const baseIdRaw = readEnv("AIRTABLE_BASE_ID", "AIRTABLE_BASE");
-  const baseId = baseIdRaw ? normalizeBaseId(baseIdRaw) : undefined;
-  const tableName = readEnv("AIRTABLE_TABLE_NAME") ?? DEFAULT_TABLE_NAME;
+  const { baseId, tableName } = resolveBaseAndTable();
 
   if (!token || !baseId) {
     const missing: string[] = [];
