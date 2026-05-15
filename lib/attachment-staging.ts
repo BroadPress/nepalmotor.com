@@ -75,9 +75,10 @@ function assertFileSize(file: File): void {
 }
 
 function getPublicOrigin(request: Request): string {
-  const fromEnv = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+  const fromEnv = process.env["NEXT_PUBLIC_SITE_URL"]?.replace(/\/$/, "");
   if (fromEnv) return fromEnv;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  const vercelUrl = process.env["VERCEL_URL"];
+  if (vercelUrl) return `https://${vercelUrl}`;
 
   const host =
     request.headers.get("x-forwarded-host") ?? request.headers.get("host");
@@ -98,10 +99,13 @@ function isPublicOrigin(origin: string): boolean {
 }
 
 function canSelfHostAttachments(request: Request): boolean {
-  if (process.env.VERCEL_URL) return true;
+  if (process.env["VERCEL_URL"]) return true;
   if (isPublicOrigin(new URL(request.url).origin)) return true;
 
-  const configuredOrigin = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+  const configuredOrigin = process.env["NEXT_PUBLIC_SITE_URL"]?.replace(
+    /\/$/,
+    "",
+  );
   if (!configuredOrigin || !isPublicOrigin(configuredOrigin)) return false;
 
   const host = new URL(request.url).hostname;

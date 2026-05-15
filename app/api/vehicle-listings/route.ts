@@ -6,7 +6,14 @@ import {
   resolveTableTarget,
   setAttachmentUrls,
 } from "@/lib/airtable";
+import {
+  formatAirtableEnvError,
+  getAirtableEnv,
+} from "@/lib/airtable-env";
 import { publishFilesForAirtable } from "@/lib/attachment-staging";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function validationError(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -73,12 +80,10 @@ function parsePayload(form: FormData): ListingPayload | null {
 }
 
 export async function POST(request: Request) {
-  if (!process.env.AIRTABLE_TOKEN || !process.env.AIRTABLE_BASE_ID) {
+  const env = getAirtableEnv();
+  if (!env.ok) {
     return NextResponse.json(
-      {
-        error:
-          "Server is missing Airtable configuration. Add AIRTABLE_TOKEN and AIRTABLE_BASE_ID to .env.local.",
-      },
+      { error: formatAirtableEnvError(env.missing) },
       { status: 500 },
     );
   }

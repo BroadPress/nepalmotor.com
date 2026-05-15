@@ -1,5 +1,6 @@
+import { formatAirtableEnvError, getAirtableEnv } from "@/lib/airtable-env";
+
 const AIRTABLE_API = "https://api.airtable.com/v0";
-const DEFAULT_TABLE_NAME = "Vehicle Listings";
 
 type AirtableFieldMeta = { id: string; name: string; type: string };
 type AirtableTableMeta = { id: string; name: string; fields: AirtableFieldMeta[] };
@@ -60,9 +61,14 @@ export type ListingPayload = {
   notes: string;
 };
 
+function requireAirtableConfig() {
+  const env = getAirtableEnv();
+  if (!env.ok) throw new Error(formatAirtableEnvError(env.missing));
+  return env.config;
+}
+
 function authHeaders(): HeadersInit {
-  const token = process.env.AIRTABLE_TOKEN;
-  if (!token) throw new Error("AIRTABLE_TOKEN is not configured");
+  const { token } = requireAirtableConfig();
   return {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
@@ -70,18 +76,15 @@ function authHeaders(): HeadersInit {
 }
 
 function baseId(): string {
-  const id = process.env.AIRTABLE_BASE_ID;
-  if (!id) throw new Error("AIRTABLE_BASE_ID is not configured");
-  return id;
+  return requireAirtableConfig().baseId;
 }
 
 function configuredTableName(): string {
-  return process.env.AIRTABLE_TABLE_NAME?.trim() || DEFAULT_TABLE_NAME;
+  return requireAirtableConfig().tableName;
 }
 
 async function fetchTablesMeta(): Promise<AirtableTableMeta[]> {
-  const token = process.env.AIRTABLE_TOKEN;
-  if (!token) throw new Error("AIRTABLE_TOKEN is not configured");
+  const { token } = requireAirtableConfig();
 
   const res = await fetch(
     `${AIRTABLE_API}/meta/bases/${baseId()}/tables`,
