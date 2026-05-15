@@ -9,11 +9,16 @@ import {
 import {
   formatAirtableEnvError,
   getAirtableEnv,
+  getAirtableEnvDiagnostics,
 } from "@/lib/airtable-env";
 import { publishFilesForAirtable } from "@/lib/attachment-staging";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+export async function GET() {
+  return NextResponse.json(getAirtableEnvDiagnostics());
+}
 
 function validationError(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
