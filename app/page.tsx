@@ -8,7 +8,7 @@ export default function Home() {
     <div className="min-h-screen bg-white font-sans text-black">
       <div className="mx-auto w-full max-w-[500px] px-5 py-10 sm:px-6 sm:py-12">
         <header className="mb-8">
-          <div className="mb-6 flex items-center justify-between gap-4">
+          <div className="mb-6 flex items-center justify-between gap-4 rounded-lg px-1 py-2 shadow-[0_2px_12px_rgba(0,0,0,0.08)] sm:px-2">
             <div className="flex min-w-0 items-center gap-2.5">
               <Image
                 src="/logo.jpeg"

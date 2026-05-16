@@ -705,14 +705,6 @@ export function ExchangeToEvForm() {
         <FilePreviewGrid files={photoFiles} onRemove={removePhotoFile} />
       </div>
 
-      <PillSelect
-        id={`${formId}-fin`}
-        label="Are you looking for Finance?"
-        required
-        options={YES_NO}
-        value={finance}
-        onChange={setFinance}
-      />
 
       <PillSelect
         id={`${formId}-gear`}
@@ -730,6 +722,7 @@ export function ExchangeToEvForm() {
         value={accidents}
         onChange={setAccidents}
       />
+
 
       <PillSelect
         id={`${formId}-fuel`}
@@ -821,6 +814,15 @@ export function ExchangeToEvForm() {
         options={EV_BRANDS}
         value={evBrand}
         onChange={setEvBrand}
+      />
+
+      <PillSelect
+        id={`${formId}-fin`}
+        label="Are you looking for Finance?"
+        required
+        options={YES_NO}
+        value={finance}
+        onChange={setFinance}
       />
 
       <div className="flex flex-col gap-1.5">
