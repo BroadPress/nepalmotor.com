@@ -13,12 +13,12 @@ export default function Home() {
               <Image
                 src="/logo.jpeg"
                 alt="NEPAL Motor"
-                width={40}
-                height={40}
-                className="h-10 w-10 shrink-0 rounded-full object-cover"
+                width={48}
+                height={48}
+                className="h-12 w-12 shrink-0 rounded-full object-cover"
                 priority
               />
-              <span className="truncate text-xl font-bold tracking-tight text-black sm:text-2xl">
+              <span className="truncate text-2xl font-bold tracking-tight text-black sm:text-3xl">
                 NEPAL Motor
               </span>
             </div>
