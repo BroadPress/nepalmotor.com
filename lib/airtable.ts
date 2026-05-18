@@ -319,17 +319,18 @@ function normalizeFeature(value: string): string {
 function mapFeaturesToField(
   features: string[],
   choices: string[],
-): string[] | undefined {
+): { field?: string[]; unmatched: string[] } {
   const normalized = [
     ...new Set(features.map(normalizeFeature).filter(Boolean)),
   ];
-  if (normalized.length === 0) return undefined;
-  if (choices.length === 0) return normalized;
+  if (normalized.length === 0) return { unmatched: [] };
+  if (choices.length === 0) return { field: normalized, unmatched: [] };
 
   const byNorm = new Map(
     choices.map((choice) => [normalizeSelectKey(choice), choice]),
   );
   const matched: string[] = [];
+  const unmatched: string[] = [];
 
   for (const feature of normalized) {
     if (choices.includes(feature)) {
@@ -337,10 +338,17 @@ function mapFeaturesToField(
       continue;
     }
     const hit = byNorm.get(normalizeSelectKey(feature));
-    if (hit && !matched.includes(hit)) matched.push(hit);
+    if (hit) {
+      if (!matched.includes(hit)) matched.push(hit);
+      continue;
+    }
+    unmatched.push(feature);
   }
 
-  return matched.length > 0 ? matched : undefined;
+  return {
+    field: matched.length > 0 ? matched : undefined,
+    unmatched,
+  };
 }
 
 export function buildAirtableFields(
@@ -404,10 +412,15 @@ export function buildAirtableFields(
     "Interested EV Brand (entered)",
   );
 
-  const featuresField = mapFeaturesToField(
-    payload.features,
-    choices["Features"] ?? [],
-  );
+  const { field: featuresField, unmatched: unmatchedFeatures } =
+    mapFeaturesToField(payload.features, choices["Features"] ?? []);
+
+  if (unmatchedFeatures.length > 0) {
+    notes = appendNote(
+      notes,
+      `Features (not in Airtable list): ${unmatchedFeatures.join(", ")}`,
+    );
+  }
 
   if (payload.city && mapCity(payload.city) === "Others" && payload.city !== "Others" && payload.city !== "Other") {
     notes = appendNote(notes, `City (entered): ${payload.city}`);

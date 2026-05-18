@@ -11,6 +11,10 @@ import {
   getAirtableEnv,
 } from "@/lib/airtable-env";
 import { publishFilesForAirtable } from "@/lib/attachment-staging";
+import {
+  parseEvBrandFromForm,
+  parseFeaturesFromForm,
+} from "@/lib/form-payload-parse";
 
 function validationError(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -26,7 +30,7 @@ export function parseListingPayload(form: FormData): ListingPayload | null {
   const vehicleModel = String(form.get("vehicleModel") ?? "").trim();
   const vehicleColor = String(form.get("vehicleColor") ?? "").trim();
   const kmDriven = String(form.get("kmDriven") ?? "").trim();
-  const evBrand = String(form.get("evBrand") ?? "").trim();
+  const evBrand = parseEvBrandFromForm(form);
   const finance = String(form.get("finance") ?? "").trim();
   const transmission = String(form.get("transmission") ?? "").trim();
   const fuelType = String(form.get("fuelType") ?? "").trim();
@@ -45,15 +49,7 @@ export function parseListingPayload(form: FormData): ListingPayload | null {
   if (!transmission) return null;
   if (!fuelType) return null;
 
-  let features: string[] = [];
-  const rawFeatures = form.get("features");
-  if (typeof rawFeatures === "string" && rawFeatures) {
-    try {
-      features = JSON.parse(rawFeatures) as string[];
-    } catch {
-      features = [];
-    }
-  }
+  const features = parseFeaturesFromForm(form);
 
   return {
     fullName,
@@ -151,11 +147,22 @@ export async function handleVehicleListingSubmission(
       return NextResponse.json({
         ok: true,
         recordId,
+        received: {
+          evBrand: payload.evBrand,
+          featuresCount: payload.features.length,
+        },
         warning: `Saved, but these files could not be uploaded: ${uploadFailures.join(", ")}`,
       });
     }
 
-    return NextResponse.json({ ok: true, recordId });
+    return NextResponse.json({
+      ok: true,
+      recordId,
+      received: {
+        evBrand: payload.evBrand,
+        featuresCount: payload.features.length,
+      },
+    });
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to submit listing";
