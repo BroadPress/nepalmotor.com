@@ -181,7 +181,11 @@ export async function resolveTableTarget(): Promise<TableTarget> {
 }
 
 function normalizeSelectKey(value: string): string {
-  return value.trim().toLowerCase();
+  return value
+    .normalize("NFC")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 /** Pick a value that already exists on the Airtable select — never invent new options. */
@@ -365,6 +369,80 @@ function fuzzyMultiSelectMatch(
   return undefined;
 }
 
+/** Split label into comparable tokens (handles "PW (Power windows)" etc.). */
+function featureMatchTokens(normalizedLabel: string): string[] {
+  return normalizedLabel
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length >= 2);
+}
+
+/** Whether a feature token is covered by some choice token (incl. plural / prefix). */
+function featureTokenCoveredByChoiceTokens(
+  ft: string,
+  choiceTokens: string[],
+): boolean {
+  for (const ct of choiceTokens) {
+    if (ft === ct) return true;
+    if (ft.length >= 3 && ct.includes(ft)) return true;
+    if (ct.length >= 3 && ft.includes(ct)) return true;
+    const [shorter, longer] =
+      ft.length <= ct.length ? [ft, ct] : [ct, ft];
+    if (shorter.length >= 3 && longer.startsWith(shorter)) return true;
+  }
+  return false;
+}
+
+/** Every feature token must appear in the choice wording (handles abbreviated Airtable labels). */
+function bestFeatureChoiceByTokens(
+  feature: string,
+  choices: string[],
+): string | undefined {
+  const fn = normalizeSelectKey(feature);
+  const fts = featureMatchTokens(fn);
+  if (fts.length === 0) return undefined;
+
+  let best: string | undefined;
+  let bestScore = 0;
+
+  for (const c of choices) {
+    const cts = featureMatchTokens(normalizeSelectKey(c));
+    if (cts.length === 0) continue;
+    let covered = 0;
+    for (const ft of fts) {
+      if (featureTokenCoveredByChoiceTokens(ft, cts)) covered += 1;
+    }
+    const score = covered / fts.length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = c;
+    }
+  }
+
+  return bestScore >= 1 ? best : undefined;
+}
+
+function resolveFeatureToChoice(
+  feature: string,
+  choices: string[],
+): string | undefined {
+  if (choices.includes(feature)) return feature;
+  const byNorm = new Map(
+    choices.map((choice) => [normalizeSelectKey(choice), choice]),
+  );
+  const hit = byNorm.get(normalizeSelectKey(feature));
+  if (hit) return hit;
+  const fuzzy = fuzzyMultiSelectMatch(feature, choices);
+  if (fuzzy) return fuzzy;
+  const picked = pickSingleSelectOption(choices, [
+    feature,
+    normalizeFeature(feature),
+  ]);
+  if (picked) return picked;
+  return bestFeatureChoiceByTokens(feature, choices);
+}
+
 /** Map form feature selections to the base's Features multi-select options. */
 function mapFeaturesToField(
   features: string[],
@@ -376,25 +454,13 @@ function mapFeaturesToField(
   if (normalized.length === 0) return { unmatched: [] };
   if (choices.length === 0) return { field: normalized, unmatched: [] };
 
-  const byNorm = new Map(
-    choices.map((choice) => [normalizeSelectKey(choice), choice]),
-  );
   const matched: string[] = [];
   const unmatched: string[] = [];
 
   for (const feature of normalized) {
-    if (choices.includes(feature)) {
-      if (!matched.includes(feature)) matched.push(feature);
-      continue;
-    }
-    const hit = byNorm.get(normalizeSelectKey(feature));
-    if (hit) {
-      if (!matched.includes(hit)) matched.push(hit);
-      continue;
-    }
-    const fuzzy = fuzzyMultiSelectMatch(feature, choices);
-    if (fuzzy) {
-      if (!matched.includes(fuzzy)) matched.push(fuzzy);
+    const resolved = resolveFeatureToChoice(feature, choices);
+    if (resolved) {
+      if (!matched.includes(resolved)) matched.push(resolved);
       continue;
     }
     unmatched.push(feature);
