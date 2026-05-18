@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   buildAirtableFields,
   createListingRecord,
+  FeatureValidationError,
   resolveFeaturesColumn,
   resolveTableTarget,
   setAttachmentUrls,
@@ -172,6 +173,17 @@ export async function handleVehicleListingSubmission(
       },
     });
   } catch (err) {
+    if (err instanceof FeatureValidationError) {
+      return NextResponse.json(
+        {
+          error:
+            "Some selected features are not configured in Airtable. Please remove or update them and try again.",
+          unmatchedFeatures: err.unmatchedFeatures,
+          featuresColumn: err.featuresColumn,
+        },
+        { status: 400 },
+      );
+    }
     const message =
       err instanceof Error ? err.message : "Failed to submit listing";
     return NextResponse.json({ error: message }, { status: 502 });

@@ -480,9 +480,19 @@ export function ExchangeToEvForm() {
         ok?: boolean;
         error?: string;
         warning?: string;
+        unmatchedFeatures?: string[];
+        featuresColumn?: string;
       };
 
       if (!res.ok) {
+        const unmatchedFeatures = data.unmatchedFeatures ?? [];
+        if (res.status === 400 && unmatchedFeatures.length > 0) {
+          const fieldLabel = data.featuresColumn ?? "Features";
+          setSubmitError(
+            `These features are not allowed in "${fieldLabel}": ${unmatchedFeatures.join(", ")}.`,
+          );
+          return;
+        }
         setSubmitError(data.error ?? "Submission failed. Please try again.");
         return;
       }

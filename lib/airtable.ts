@@ -51,6 +51,20 @@ export type ListingPayload = {
   notes: string;
 };
 
+export class FeatureValidationError extends Error {
+  readonly unmatchedFeatures: string[];
+  readonly featuresColumn: string;
+
+  constructor(unmatchedFeatures: string[], featuresColumn: string) {
+    super(
+      `These features are not valid for Airtable column "${featuresColumn}": ${unmatchedFeatures.join(", ")}`,
+    );
+    this.name = "FeatureValidationError";
+    this.unmatchedFeatures = unmatchedFeatures;
+    this.featuresColumn = featuresColumn;
+  }
+}
+
 function requireAirtableConfig() {
   const env = getAirtableEnv();
   if (!env.ok) throw new Error(formatAirtableEnvError(env.missing));
@@ -440,10 +454,13 @@ export function buildAirtableFields(
   const { columnName: featuresColumnName, choices: featureChoices } =
     resolveFeaturesColumn(choices);
 
-  const { field: featuresField } = mapFeaturesToField(
+  const { field: featuresField, unmatched: unmatchedFeatures } = mapFeaturesToField(
     payload.features,
     featureChoices,
   );
+  if (unmatchedFeatures.length > 0) {
+    throw new FeatureValidationError(unmatchedFeatures, featuresColumnName);
+  }
 
   const entries: [string, unknown][] = [
     ["Full Name", payload.fullName.trim()],
