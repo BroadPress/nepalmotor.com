@@ -21,27 +21,6 @@ export type TableTarget = {
 
 let tableTargetCache: TableTarget | null = null;
 
-const AIRTABLE_FEATURES = new Set([
-  "Basic",
-  "A/C",
-  "Full",
-  "Premium",
-  "4WD",
-  "Sunroof",
-  "Navigation",
-  "Autopilot",
-  "Leather Seats",
-  "Panoramic Roof",
-  "AWD",
-  "Backup Camera",
-  "Hybrid",
-  "Cruise Control",
-  "Blind Spot Monitor",
-  "Heated Seats",
-  "Tow Package",
-  "Other",
-]);
-
 const FEATURE_ALIASES: Record<string, string> = {
   "leather seats": "Leather Seats",
   "reverse camera": "Backup Camera",
@@ -330,27 +309,38 @@ function evBrandCandidates(formBrand: string): string[] {
   return candidates;
 }
 
-function splitFeatures(features: string[]): {
-  airtable: string[];
-  extra: string[];
-} {
-  const airtable: string[] = [];
-  const extra: string[] = [];
+function normalizeFeature(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+  return FEATURE_ALIASES[trimmed.toLowerCase()] ?? trimmed;
+}
 
-  for (const f of features) {
-    const alias = FEATURE_ALIASES[f.toLowerCase()];
-    if (alias && AIRTABLE_FEATURES.has(alias)) {
-      if (!airtable.includes(alias)) airtable.push(alias);
+/** Map form feature selections to the base's Features multi-select options. */
+function mapFeaturesToField(
+  features: string[],
+  choices: string[],
+): string[] | undefined {
+  const normalized = [
+    ...new Set(features.map(normalizeFeature).filter(Boolean)),
+  ];
+  if (normalized.length === 0) return undefined;
+  if (choices.length === 0) return normalized;
+
+  const byNorm = new Map(
+    choices.map((choice) => [normalizeSelectKey(choice), choice]),
+  );
+  const matched: string[] = [];
+
+  for (const feature of normalized) {
+    if (choices.includes(feature)) {
+      if (!matched.includes(feature)) matched.push(feature);
       continue;
     }
-    if (AIRTABLE_FEATURES.has(f)) {
-      if (!airtable.includes(f)) airtable.push(f);
-    } else {
-      extra.push(f);
-    }
+    const hit = byNorm.get(normalizeSelectKey(feature));
+    if (hit && !matched.includes(hit)) matched.push(hit);
   }
 
-  return { airtable, extra };
+  return matched.length > 0 ? matched : undefined;
 }
 
 export function buildAirtableFields(
@@ -359,18 +349,9 @@ export function buildAirtableFields(
 ): Record<string, unknown> {
   const year = parseInt(payload.year, 10);
   const km = parseInt(payload.kmDriven, 10);
-  const { airtable: featureTags, extra: extraFeatures } = splitFeatures(
-    payload.features,
-  );
   const choices = target.selectChoices;
 
   let notes = payload.notes.trim();
-  if (extraFeatures.length > 0) {
-    notes = appendNote(
-      notes,
-      `Additional features: ${extraFeatures.join(", ")}`,
-    );
-  }
 
   const setSelect = (
     fieldName: string,
@@ -423,23 +404,10 @@ export function buildAirtableFields(
     "Interested EV Brand (entered)",
   );
 
-  const featureChoices = choices["Features"] ?? [];
-  let featuresField: string[] | undefined;
-  if (featureTags.length > 0) {
-    if (featureChoices.length === 0) {
-      featuresField = featureTags;
-    } else {
-      const matched = featureTags.filter((t) => featureChoices.includes(t));
-      const unmatched = featureTags.filter((t) => !featureChoices.includes(t));
-      if (matched.length > 0) featuresField = matched;
-      if (unmatched.length > 0) {
-        notes = appendNote(
-          notes,
-          `Features (not in Airtable list): ${unmatched.join(", ")}`,
-        );
-      }
-    }
-  }
+  const featuresField = mapFeaturesToField(
+    payload.features,
+    choices["Features"] ?? [],
+  );
 
   if (payload.city && mapCity(payload.city) === "Others" && payload.city !== "Others" && payload.city !== "Other") {
     notes = appendNote(notes, `City (entered): ${payload.city}`);
