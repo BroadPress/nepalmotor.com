@@ -2,17 +2,15 @@ import { NextResponse } from "next/server";
 import {
   buildAirtableFields,
   createListingRecord,
-  FeatureValidationError,
   resolveFeaturesColumn,
   resolveTableTarget,
-  setAttachmentUrls,
+  uploadAttachmentToField,
   type ListingPayload,
 } from "@/lib/airtable";
 import {
   formatAirtableEnvError,
   getAirtableEnv,
 } from "@/lib/airtable-env";
-import { publishFilesForAirtable } from "@/lib/attachment-staging";
 import {
   parseEvBrandFromForm,
   parseFeaturesFromForm,
@@ -130,12 +128,13 @@ export async function handleVehicleListingSubmission(
         return;
       }
 
-      try {
-        const urls = await publishFilesForAirtable(files, request);
-        await setAttachmentUrls(recordId, fieldName, urls);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Upload failed";
-        uploadFailures.push(...files.map((f) => `${f.name}: ${msg}`));
+      for (const file of files) {
+        try {
+          await uploadAttachmentToField(recordId, fieldName, file);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Upload failed";
+          uploadFailures.push(`${file.name}: ${msg}`);
+        }
       }
     };
 
@@ -173,17 +172,6 @@ export async function handleVehicleListingSubmission(
       },
     });
   } catch (err) {
-    if (err instanceof FeatureValidationError) {
-      return NextResponse.json(
-        {
-          error:
-            "Some selected features are not configured in Airtable. Please remove or update them and try again.",
-          unmatchedFeatures: err.unmatchedFeatures,
-          featuresColumn: err.featuresColumn,
-        },
-        { status: 400 },
-      );
-    }
     const message =
       err instanceof Error ? err.message : "Failed to submit listing";
     return NextResponse.json({ error: message }, { status: 502 });

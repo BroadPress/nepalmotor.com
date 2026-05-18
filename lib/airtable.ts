@@ -1,6 +1,25 @@
 import { formatAirtableEnvError, getAirtableEnv } from "@/lib/airtable-env";
 
 const AIRTABLE_API = "https://api.airtable.com/v0";
+const AIRTABLE_CONTENT_API = "https://content.airtable.com/v0";
+const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+
+const ATTACHMENT_MIME_BY_EXT: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
+  pdf: "application/pdf",
+};
+
+function inferAttachmentMime(file: File): string {
+  if (file.type) return file.type;
+  const ext = file.name.split(".").pop()?.toLowerCase();
+  return ATTACHMENT_MIME_BY_EXT[ext ?? ""] ?? "application/octet-stream";
+}
 
 type AirtableFieldMeta = {
   id: string;
@@ -520,13 +539,17 @@ export function buildAirtableFields(
   const { columnName: featuresColumnName, choices: featureChoices } =
     resolveFeaturesColumn(choices);
 
-  const { field: featuresField, unmatched: unmatchedFeatures } = mapFeaturesToField(
-    payload.features,
-    featureChoices,
-  );
-  if (unmatchedFeatures.length > 0) {
-    throw new FeatureValidationError(unmatchedFeatures, featuresColumnName);
-  }
+  const { field: matchedFeatures, unmatched: unmatchedFeatures } =
+    mapFeaturesToField(payload.features, featureChoices);
+
+  const allFeatures = [
+    ...(matchedFeatures ?? []),
+    ...unmatchedFeatures.filter(
+      (feature) => !(matchedFeatures ?? []).includes(feature),
+    ),
+  ];
+  const featuresField: string[] | undefined =
+    allFeatures.length > 0 ? allFeatures : undefined;
 
   const entries: [string, unknown][] = [
     ["Full Name", payload.fullName.trim()],
@@ -562,7 +585,7 @@ export async function createListingRecord(
     {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ records: [{ fields }] }),
+      body: JSON.stringify({ records: [{ fields }], typecast: true }),
     },
   );
 
@@ -578,6 +601,54 @@ export async function createListingRecord(
   const id = data.records?.[0]?.id;
   if (!id) throw new Error("Airtable did not return a record id");
   return id;
+}
+
+/**
+ * Upload a file directly to an Airtable attachment field via the content API.
+ * Avoids the public-URL roundtrip (which is unreliable on stateless serverless),
+ * so uploads from mobile clients are not lost between lambda invocations.
+ */
+export async function uploadAttachmentToField(
+  recordId: string,
+  fieldName: string,
+  file: File,
+): Promise<void> {
+  if (file.size === 0) return;
+  if (file.size > ATTACHMENT_MAX_BYTES) {
+    throw new Error(
+      `${file.name} is too large (max ${ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB per file)`,
+    );
+  }
+
+  const { token } = requireAirtableConfig();
+  const bytes = Buffer.from(await file.arrayBuffer());
+
+  const res = await fetch(
+    `${AIRTABLE_CONTENT_API}/${baseId()}/${recordId}/${encodeURIComponent(fieldName)}/uploadAttachment`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contentType: inferAttachmentMime(file),
+        filename: file.name,
+        file: bytes.toString("base64"),
+      }),
+    },
+  );
+
+  const data = (await res.json().catch(() => ({}))) as {
+    error?: { message?: string } | string;
+  };
+  if (!res.ok) {
+    const msg =
+      typeof data.error === "string"
+        ? data.error
+        : data.error?.message ?? `Airtable attachment upload failed (${res.status})`;
+    throw new Error(msg);
+  }
 }
 
 export async function setAttachmentUrls(
