@@ -107,9 +107,10 @@ export async function handleVehicleListingSubmission(
     .filter((f): f is File => f instanceof File && f.size > 0);
 
   try {
-    const fields = buildAirtableFields(payload);
+    const tableTarget = await resolveTableTarget();
+    const fields = buildAirtableFields(payload, tableTarget);
     const recordId = await createListingRecord(fields);
-    const { attachmentFieldNames } = await resolveTableTarget();
+    const { attachmentFieldNames } = tableTarget;
 
     const uploadFailures: string[] = [];
 

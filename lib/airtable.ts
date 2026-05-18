@@ -2,14 +2,21 @@ import { formatAirtableEnvError, getAirtableEnv } from "@/lib/airtable-env";
 
 const AIRTABLE_API = "https://api.airtable.com/v0";
 
-type AirtableFieldMeta = { id: string; name: string; type: string };
+type AirtableFieldMeta = {
+  id: string;
+  name: string;
+  type: string;
+  options?: { choices?: { name: string }[] };
+};
 type AirtableTableMeta = { id: string; name: string; fields: AirtableFieldMeta[] };
-type TableTarget = {
+export type TableTarget = {
   tableName: string;
   attachmentFieldNames: {
     documents?: string;
     photos?: string;
   };
+  /** Exact Single select / Multiple select option names from this base. */
+  selectChoices: Record<string, string[]>;
 };
 
 let tableTargetCache: TableTarget | null = null;
@@ -135,20 +142,98 @@ export async function resolveTableTarget(): Promise<TableTarget> {
     );
   }
 
-  const findField = (name: string) =>
-    table.fields.find((f) => f.name === name && f.type === "multipleAttachments");
+  const attachmentFields = table.fields.filter(
+    (f) => f.type === "multipleAttachments",
+  );
 
-  const fieldName = (name: string) => findField(name)?.name;
+  const findAttachmentField = (...preferredNames: string[]) => {
+    for (const name of preferredNames) {
+      const exact = attachmentFields.find((f) => f.name === name);
+      if (exact) return exact.name;
+    }
+    return undefined;
+  };
+
+  const findAttachmentByKeyword = (keyword: string) =>
+    attachmentFields.find((f) => f.name.toLowerCase().includes(keyword))?.name;
+
+  const selectChoices: Record<string, string[]> = {};
+  for (const field of table.fields) {
+    if (field.type !== "singleSelect" && field.type !== "multipleSelects") {
+      continue;
+    }
+    const names =
+      field.options?.choices?.map((c) => c.name).filter(Boolean) ?? [];
+    if (names.length > 0) selectChoices[field.name] = names;
+  }
 
   tableTargetCache = {
     tableName: table.name,
     attachmentFieldNames: {
-      documents: fieldName("Upload Vehicle Document"),
-      photos: fieldName("Upload Vehicle Photo"),
+      documents:
+        findAttachmentField("Upload Vehicle Document", "Vehicle Document") ??
+        findAttachmentByKeyword("document"),
+      photos:
+        findAttachmentField("Upload Vehicle Photo", "Vehicle Photo") ??
+        findAttachmentByKeyword("photo") ??
+        findAttachmentByKeyword("image"),
     },
+    selectChoices,
   };
 
   return tableTargetCache;
+}
+
+function normalizeSelectKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+/** Pick a value that already exists on the Airtable select — never invent new options. */
+export function pickSingleSelectOption(
+  choices: string[],
+  candidates: string[],
+): string | undefined {
+  if (choices.length === 0) {
+    return candidates.find((c) => c?.trim())?.trim();
+  }
+
+  const byNorm = new Map(
+    choices.map((choice) => [normalizeSelectKey(choice), choice]),
+  );
+
+  for (const cand of candidates) {
+    if (!cand?.trim()) continue;
+    if (choices.includes(cand)) return cand;
+    const exact = byNorm.get(normalizeSelectKey(cand));
+    if (exact) return exact;
+  }
+
+  for (const cand of candidates) {
+    if (!cand?.trim()) continue;
+    const cn = normalizeSelectKey(cand);
+    for (const choice of choices) {
+      const on = normalizeSelectKey(choice);
+      if (on === cn || on.startsWith(cn) || cn.startsWith(on)) return choice;
+    }
+  }
+
+  for (const fallback of [
+    "Other/undecide",
+    "Other",
+    "I need suggestion",
+    "I don't know",
+    "I dont know",
+    "No",
+  ]) {
+    const hit = byNorm.get(normalizeSelectKey(fallback));
+    if (hit) return hit;
+  }
+
+  return undefined;
+}
+
+function appendNote(notes: string, line: string): string {
+  return notes ? `${notes}\n\n${line}` : line;
 }
 
 function mapCity(city: string): string {
@@ -225,42 +310,6 @@ function mapTransmission(value: string): string {
   return allowed.has(mapped) ? mapped : "Semi Automatic";
 }
 
-/** Short labels (Hein test base): BYD, Tesla, … */
-const AIRTABLE_EV_BRANDS_SHORT = new Set([
-  "BYD",
-  "Tesla",
-  "Nissan",
-  "Hyundai",
-  "MG",
-  "Tata",
-  "Mahindra",
-  "Other/undecide",
-]);
-
-/** Production / client base model names on "Interested EV Brand". */
-const AIRTABLE_EV_MODELS = [
-  "Tata Nexon EV",
-  "Tata Tigor EV",
-  "Tata Punch EV",
-  "BYD Atto 3",
-  "BYD Dolphin",
-  "BYD e6",
-  "MG ZS EV",
-  "MG4 EV",
-  "MG S5 EV",
-  "Neta V",
-  "Neta U",
-  "Neta X",
-  "Hyundai Kona Electric",
-  "Hyundai Ioniq 5",
-  "Hyundai Creta EV",
-  "Kia EV6",
-  "Kia EV9",
-  "Kia Niro EV",
-  "I need suggestion",
-  "Other",
-] as const;
-
 const EV_FORM_TO_MODEL: Record<string, string> = {
   BYD: "BYD Atto 3",
   MG: "MG ZS EV",
@@ -271,36 +320,14 @@ const EV_FORM_TO_MODEL: Record<string, string> = {
   Tesla: "Other",
 };
 
-function evBrandFormat(): "short" | "detailed" {
-  const raw = process.env["AIRTABLE_EV_BRAND_FORMAT"]?.trim().toLowerCase();
-  return raw === "short" ? "short" : "detailed";
-}
-
-function mapEvBrand(brand: string): {
-  interested: string;
-  other?: string;
-} {
-  const value = brand.trim();
-
+function evBrandCandidates(formBrand: string): string[] {
+  const value = formBrand.trim();
   if (value === "Other / undecided") {
-    return {
-      interested:
-        evBrandFormat() === "short" ? "Other/undecide" : "I need suggestion",
-    };
+    return ["Other/undecide", "I need suggestion", "Other", value];
   }
-
-  if (evBrandFormat() === "short") {
-    if (AIRTABLE_EV_BRANDS_SHORT.has(value)) return { interested: value };
-    return { interested: "Other/undecide", other: value };
-  }
-
-  if ((AIRTABLE_EV_MODELS as readonly string[]).includes(value)) {
-    return { interested: value };
-  }
-  if (EV_FORM_TO_MODEL[value]) {
-    return { interested: EV_FORM_TO_MODEL[value] };
-  }
-  return { interested: "Other", other: value };
+  const candidates = [value];
+  if (EV_FORM_TO_MODEL[value]) candidates.push(EV_FORM_TO_MODEL[value]);
+  return candidates;
 }
 
 function splitFeatures(features: string[]): {
@@ -326,37 +353,115 @@ function splitFeatures(features: string[]): {
   return { airtable, extra };
 }
 
-export function buildAirtableFields(payload: ListingPayload): Record<string, unknown> {
+export function buildAirtableFields(
+  payload: ListingPayload,
+  target: TableTarget,
+): Record<string, unknown> {
   const year = parseInt(payload.year, 10);
   const km = parseInt(payload.kmDriven, 10);
-  const { airtable: featureTags } = splitFeatures(payload.features);
-  const ev = mapEvBrand(payload.evBrand);
-  const accidents = mapAccidents(payload.accidents);
+  const { airtable: featureTags, extra: extraFeatures } = splitFeatures(
+    payload.features,
+  );
+  const choices = target.selectChoices;
 
   let notes = payload.notes.trim();
-  if (payload.city && mapCity(payload.city) === "Others" && payload.city !== "Others") {
-    const line = `City (entered): ${payload.city}`;
-    notes = notes ? `${notes}\n\n${line}` : line;
+  if (extraFeatures.length > 0) {
+    notes = appendNote(
+      notes,
+      `Additional features: ${extraFeatures.join(", ")}`,
+    );
   }
 
-  // Order matches the website / mobile form (EV brand, finance, notes last).
+  const setSelect = (
+    fieldName: string,
+    candidates: string[],
+    notesLabel: string,
+  ): string | undefined => {
+    const picked = pickSingleSelectOption(choices[fieldName] ?? [], candidates);
+    if (picked) return picked;
+    const raw = candidates.find((c) => c?.trim());
+    if (raw) notes = appendNote(notes, `${notesLabel}: ${raw}`);
+    return undefined;
+  };
+
+  const city = setSelect(
+    "City",
+    [mapCity(payload.city), payload.city],
+    "City (entered)",
+  );
+  const vehicleType = setSelect(
+    "Vehicle Type",
+    [mapVehicleType(payload.vehicleType), payload.vehicleType],
+    "Vehicle Type (entered)",
+  );
+  const vehicleColor = setSelect(
+    "Vehicle Color",
+    [mapColor(payload.vehicleColor), payload.vehicleColor],
+    "Vehicle Color (entered)",
+  );
+  const transmission = setSelect(
+    "Transmission / Gear",
+    [mapTransmission(payload.transmission), payload.transmission],
+    "Transmission (entered)",
+  );
+  const accidents = payload.accidents
+    ? setSelect(
+        "Accidents",
+        [mapAccidents(payload.accidents) ?? "", payload.accidents],
+        "Accidents (entered)",
+      )
+    : undefined;
+  const fuelType = setSelect(
+    "Fuel Type",
+    [payload.fuelType],
+    "Fuel Type (entered)",
+  );
+  const finance = setSelect("Finance", [payload.finance], "Finance (entered)");
+  const evBrand = setSelect(
+    "Interested EV Brand",
+    evBrandCandidates(payload.evBrand),
+    "Interested EV Brand (entered)",
+  );
+
+  const featureChoices = choices["Features"] ?? [];
+  let featuresField: string[] | undefined;
+  if (featureTags.length > 0) {
+    if (featureChoices.length === 0) {
+      featuresField = featureTags;
+    } else {
+      const matched = featureTags.filter((t) => featureChoices.includes(t));
+      const unmatched = featureTags.filter((t) => !featureChoices.includes(t));
+      if (matched.length > 0) featuresField = matched;
+      if (unmatched.length > 0) {
+        notes = appendNote(
+          notes,
+          `Features (not in Airtable list): ${unmatched.join(", ")}`,
+        );
+      }
+    }
+  }
+
+  if (payload.city && mapCity(payload.city) === "Others" && payload.city !== "Others" && payload.city !== "Other") {
+    notes = appendNote(notes, `City (entered): ${payload.city}`);
+  }
+
   const entries: [string, unknown][] = [
     ["Full Name", payload.fullName.trim()],
     ["Email", payload.email.trim()],
     ["Phone", payload.phone.trim()],
-    ["City", mapCity(payload.city)],
+    ["City", city],
     ["Year of Manufacture", Number.isFinite(year) ? year : undefined],
-    ["Vehicle Type", mapVehicleType(payload.vehicleType)],
+    ["Vehicle Type", vehicleType],
     ["Vehicle Model", payload.vehicleModel.trim()],
     ["Vehicle Brand", payload.vehicleBrand.trim()],
-    ["Vehicle Color", mapColor(payload.vehicleColor)],
+    ["Vehicle Color", vehicleColor],
     ["KM Driven", Number.isFinite(km) ? km : undefined],
-    ["Transmission / Gear", mapTransmission(payload.transmission)],
+    ["Transmission / Gear", transmission],
     ["Accidents", accidents],
-    ["Fuel Type", payload.fuelType],
-    ["Features", featureTags.length > 0 ? featureTags : undefined],
-    ["Interested EV Brand", ev.interested.trim()],
-    ["Finance", payload.finance],
+    ["Fuel Type", fuelType],
+    ["Features", featuresField],
+    ["Interested EV Brand", evBrand],
+    ["Finance", finance],
     ["Notes", notes || undefined],
   ];
 
