@@ -202,10 +202,17 @@ function mapColor(color: string): string {
   return allowed.has(mapped) ? mapped : "I don't know";
 }
 
+/** Website labels → production Airtable "Accidents" single-select options. */
 function mapAccidents(value: string): string | undefined {
   if (!value) return undefined;
-  // Same labels as the website form — add these options on Airtable "Accidents"
-  return value.trim();
+  const map: Record<string, string> = {
+    None: "No",
+    Minor: "Few times",
+    Major: "Many times",
+    "Prefer not to say": "I don't know",
+  };
+  const trimmed = value.trim();
+  return map[trimmed] ?? trimmed;
 }
 
 function mapTransmission(value: string): string {
