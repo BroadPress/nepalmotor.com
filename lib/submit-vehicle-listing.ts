@@ -4,6 +4,7 @@ import {
   createListingRecord,
   resolveFeaturesColumn,
   resolveTableTarget,
+  setAttachmentUrls,
   uploadAttachmentToField,
   type ListingPayload,
 } from "@/lib/airtable";
@@ -11,9 +12,15 @@ import {
   formatAirtableEnvError,
   getAirtableEnv,
 } from "@/lib/airtable-env";
+import { publishFilesForAirtable } from "@/lib/attachment-staging";
 import {
+  parseDocumentFilesFromForm,
   parseEvBrandFromForm,
   parseFeaturesFromForm,
+  parseFinanceFromForm,
+  parseNotesFromForm,
+  parsePhotoFilesFromForm,
+  reconcileFinanceAndNotes,
 } from "@/lib/form-payload-parse";
 
 function validationError(message: string) {
@@ -33,7 +40,11 @@ export async function parseListingPayload(
   const vehicleColor = String(form.get("vehicleColor") ?? "").trim();
   const kmDriven = String(form.get("kmDriven") ?? "").trim();
   const evBrand = parseEvBrandFromForm(form);
-  const finance = String(form.get("finance") ?? "").trim();
+  const { finance, notes } = reconcileFinanceAndNotes(
+    parseFinanceFromForm(form),
+    parseNotesFromForm(form),
+    form,
+  );
   const transmission = String(form.get("transmission") ?? "").trim();
   const fuelType = String(form.get("fuelType") ?? "").trim();
 
@@ -70,7 +81,7 @@ export async function parseListingPayload(
     accidents: String(form.get("accidents") ?? ""),
     fuelType,
     features,
-    notes: String(form.get("notes") ?? ""),
+    notes,
   };
 }
 
@@ -97,12 +108,8 @@ export async function handleVehicleListingSubmission(
     return validationError("Please fill in all required fields.");
   }
 
-  const docFiles = form
-    .getAll("documents")
-    .filter((f): f is File => f instanceof File && f.size > 0);
-  const photoFiles = form
-    .getAll("photos")
-    .filter((f): f is File => f instanceof File && f.size > 0);
+  const docFiles = await parseDocumentFilesFromForm(form);
+  const photoFiles = await parsePhotoFilesFromForm(form);
 
   try {
     const tableTarget = await resolveTableTarget();
@@ -111,17 +118,19 @@ export async function handleVehicleListingSubmission(
     );
     const fields = buildAirtableFields(payload, tableTarget);
     const recordId = await createListingRecord(fields);
-    const { attachmentFieldNames } = tableTarget;
+    const { attachmentFieldNames, attachmentFieldIds } = tableTarget;
 
     const uploadFailures: string[] = [];
 
     const uploadGroup = async (
       files: File[],
       fieldName: string | undefined,
+      fieldId: string | undefined,
       missingLabel: string,
     ) => {
       if (files.length === 0) return;
-      if (!fieldName) {
+      const fieldRef = fieldId ?? fieldName;
+      if (!fieldRef || !fieldName) {
         uploadFailures.push(
           ...files.map((f) => `${f.name} (${missingLabel})`),
         );
@@ -130,10 +139,20 @@ export async function handleVehicleListingSubmission(
 
       for (const file of files) {
         try {
-          await uploadAttachmentToField(recordId, fieldName, file);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "Upload failed";
-          uploadFailures.push(`${file.name}: ${msg}`);
+          await uploadAttachmentToField(recordId, fieldRef, file);
+        } catch (directErr) {
+          try {
+            const urls = await publishFilesForAirtable([file], request);
+            await setAttachmentUrls(recordId, fieldName, urls);
+          } catch (fallbackErr) {
+            const directMsg =
+              directErr instanceof Error ? directErr.message : "Upload failed";
+            const fallbackMsg =
+              fallbackErr instanceof Error
+                ? fallbackErr.message
+                : "Upload failed";
+            uploadFailures.push(`${file.name}: ${directMsg}; ${fallbackMsg}`);
+          }
         }
       }
     };
@@ -141,11 +160,13 @@ export async function handleVehicleListingSubmission(
     await uploadGroup(
       docFiles,
       attachmentFieldNames.documents,
+      attachmentFieldIds.documents,
       "no document field in Airtable",
     );
     await uploadGroup(
       photoFiles,
       attachmentFieldNames.photos,
+      attachmentFieldIds.photos,
       "no photo field in Airtable",
     );
 

@@ -1,7 +1,6 @@
 import { formatAirtableEnvError, getAirtableEnv } from "@/lib/airtable-env";
 
 const AIRTABLE_API = "https://api.airtable.com/v0";
-const AIRTABLE_CONTENT_API = "https://content.airtable.com/v0";
 const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
 
 const ATTACHMENT_MIME_BY_EXT: Record<string, string> = {
@@ -31,6 +30,10 @@ type AirtableTableMeta = { id: string; name: string; fields: AirtableFieldMeta[]
 export type TableTarget = {
   tableName: string;
   attachmentFieldNames: {
+    documents?: string;
+    photos?: string;
+  };
+  attachmentFieldIds: {
     documents?: string;
     photos?: string;
   };
@@ -164,13 +167,13 @@ export async function resolveTableTarget(): Promise<TableTarget> {
   const findAttachmentField = (...preferredNames: string[]) => {
     for (const name of preferredNames) {
       const exact = attachmentFields.find((f) => f.name === name);
-      if (exact) return exact.name;
+      if (exact) return exact;
     }
     return undefined;
   };
 
   const findAttachmentByKeyword = (keyword: string) =>
-    attachmentFields.find((f) => f.name.toLowerCase().includes(keyword))?.name;
+    attachmentFields.find((f) => f.name.toLowerCase().includes(keyword));
 
   const selectChoices: Record<string, string[]> = {};
   for (const field of table.fields) {
@@ -182,16 +185,23 @@ export async function resolveTableTarget(): Promise<TableTarget> {
     if (names.length > 0) selectChoices[field.name] = names;
   }
 
+  const documentsField =
+    findAttachmentField("Upload Vehicle Document", "Vehicle Document") ??
+    findAttachmentByKeyword("document");
+  const photosField =
+    findAttachmentField("Upload Vehicle Photo", "Vehicle Photo") ??
+    findAttachmentByKeyword("photo") ??
+    findAttachmentByKeyword("image");
+
   tableTargetCache = {
     tableName: table.name,
     attachmentFieldNames: {
-      documents:
-        findAttachmentField("Upload Vehicle Document", "Vehicle Document") ??
-        findAttachmentByKeyword("document"),
-      photos:
-        findAttachmentField("Upload Vehicle Photo", "Vehicle Photo") ??
-        findAttachmentByKeyword("photo") ??
-        findAttachmentByKeyword("image"),
+      documents: documentsField?.name,
+      photos: photosField?.name,
+    },
+    attachmentFieldIds: {
+      documents: documentsField?.id,
+      photos: photosField?.id,
     },
     selectChoices,
   };
@@ -604,13 +614,12 @@ export async function createListingRecord(
 }
 
 /**
- * Upload a file directly to an Airtable attachment field via the content API.
- * Avoids the public-URL roundtrip (which is unreliable on stateless serverless),
- * so uploads from mobile clients are not lost between lambda invocations.
+ * Upload a file directly to an Airtable attachment field (base64 body).
+ * Prefer field id when available; falls back to the field display name.
  */
 export async function uploadAttachmentToField(
   recordId: string,
-  fieldName: string,
+  fieldIdOrName: string,
   file: File,
 ): Promise<void> {
   if (file.size === 0) return;
@@ -624,7 +633,7 @@ export async function uploadAttachmentToField(
   const bytes = Buffer.from(await file.arrayBuffer());
 
   const res = await fetch(
-    `${AIRTABLE_CONTENT_API}/${baseId()}/${recordId}/${encodeURIComponent(fieldName)}/uploadAttachment`,
+    `${AIRTABLE_API}/${baseId()}/${recordId}/${encodeURIComponent(fieldIdOrName)}/uploadAttachment`,
     {
       method: "POST",
       headers: {
