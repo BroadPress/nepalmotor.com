@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import {
   buildAirtableFields,
   createListingRecord,
-  type ListingPayload,
+  resolveFeaturesColumn,
   resolveTableTarget,
   setAttachmentUrls,
+  type ListingPayload,
 } from "@/lib/airtable";
 import {
   formatAirtableEnvError,
@@ -20,7 +21,9 @@ function validationError(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }
 
-export function parseListingPayload(form: FormData): ListingPayload | null {
+export async function parseListingPayload(
+  form: FormData,
+): Promise<ListingPayload | null> {
   const fullName = String(form.get("fullName") ?? "").trim();
   const phone = String(form.get("phone") ?? "").trim();
   const city = String(form.get("city") ?? "").trim();
@@ -49,7 +52,7 @@ export function parseListingPayload(form: FormData): ListingPayload | null {
   if (!transmission) return null;
   if (!fuelType) return null;
 
-  const features = parseFeaturesFromForm(form);
+  const features = await parseFeaturesFromForm(form);
 
   return {
     fullName,
@@ -90,7 +93,7 @@ export async function handleVehicleListingSubmission(
     return validationError("Invalid form data");
   }
 
-  const payload = parseListingPayload(form);
+  const payload = await parseListingPayload(form);
   if (!payload) {
     return validationError("Please fill in all required fields.");
   }
@@ -104,6 +107,9 @@ export async function handleVehicleListingSubmission(
 
   try {
     const tableTarget = await resolveTableTarget();
+    const { columnName: featuresAirtableColumn } = resolveFeaturesColumn(
+      tableTarget.selectChoices,
+    );
     const fields = buildAirtableFields(payload, tableTarget);
     const recordId = await createListingRecord(fields);
     const { attachmentFieldNames } = tableTarget;
@@ -149,7 +155,8 @@ export async function handleVehicleListingSubmission(
         recordId,
         received: {
           evBrand: payload.evBrand,
-          featuresCount: payload.features.length,
+          features: payload.features,
+          featuresAirtableColumn,
         },
         warning: `Saved, but these files could not be uploaded: ${uploadFailures.join(", ")}`,
       });
@@ -160,7 +167,8 @@ export async function handleVehicleListingSubmission(
       recordId,
       received: {
         evBrand: payload.evBrand,
-        featuresCount: payload.features.length,
+        features: payload.features,
+        featuresAirtableColumn,
       },
     });
   } catch (err) {

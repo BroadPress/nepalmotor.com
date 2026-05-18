@@ -22,6 +22,9 @@ export type TableTarget = {
 let tableTargetCache: TableTarget | null = null;
 
 const FEATURE_ALIASES: Record<string, string> = {
+  abs: "ABS",
+  airbag: "Airbags",
+  airbags: "Airbags",
   "leather seats": "Leather Seats",
   "reverse camera": "Backup Camera",
   "cruise control": "Cruise Control",
@@ -211,10 +214,6 @@ export function pickSingleSelectOption(
   return undefined;
 }
 
-function appendNote(notes: string, line: string): string {
-  return notes ? `${notes}\n\n${line}` : line;
-}
-
 function mapCity(city: string): string {
   const allowed = new Set([
     "Kathmandu",
@@ -312,7 +311,44 @@ function evBrandCandidates(formBrand: string): string[] {
 function normalizeFeature(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return trimmed;
-  return FEATURE_ALIASES[trimmed.toLowerCase()] ?? trimmed;
+  const lower = trimmed.toLowerCase();
+  return FEATURE_ALIASES[lower] ?? trimmed;
+}
+
+/** Airtable column for multi-select features (exact name varies by base). */
+export function resolveFeaturesColumn(
+  selectChoices: Record<string, string[]>,
+): { columnName: string; choices: string[] } {
+  if (Object.prototype.hasOwnProperty.call(selectChoices, "Features")) {
+    return { columnName: "Features", choices: selectChoices["Features"] ?? [] };
+  }
+  for (const [name, choices] of Object.entries(selectChoices)) {
+    if (/^features?$/i.test(name.trim())) {
+      return { columnName: name, choices };
+    }
+  }
+  for (const [name, choices] of Object.entries(selectChoices)) {
+    if (/feature/i.test(name)) {
+      return { columnName: name, choices };
+    }
+  }
+  return { columnName: "Features", choices: [] };
+}
+
+function fuzzyMultiSelectMatch(
+  feature: string,
+  choices: string[],
+): string | undefined {
+  const fn = normalizeSelectKey(feature);
+  if (!fn) return undefined;
+  for (const c of choices) {
+    if (normalizeSelectKey(c) === fn) return c;
+  }
+  for (const c of choices) {
+    const cn = normalizeSelectKey(c);
+    if (cn.includes(fn) || fn.includes(cn)) return c;
+  }
+  return undefined;
 }
 
 /** Map form feature selections to the base's Features multi-select options. */
@@ -342,6 +378,11 @@ function mapFeaturesToField(
       if (!matched.includes(hit)) matched.push(hit);
       continue;
     }
+    const fuzzy = fuzzyMultiSelectMatch(feature, choices);
+    if (fuzzy) {
+      if (!matched.includes(fuzzy)) matched.push(fuzzy);
+      continue;
+    }
     unmatched.push(feature);
   }
 
@@ -359,72 +400,50 @@ export function buildAirtableFields(
   const km = parseInt(payload.kmDriven, 10);
   const choices = target.selectChoices;
 
-  let notes = payload.notes.trim();
+  const notes = payload.notes.trim();
 
   const setSelect = (
     fieldName: string,
     candidates: string[],
-    notesLabel: string,
   ): string | undefined => {
     const picked = pickSingleSelectOption(choices[fieldName] ?? [], candidates);
     if (picked) return picked;
-    const raw = candidates.find((c) => c?.trim());
-    if (raw) notes = appendNote(notes, `${notesLabel}: ${raw}`);
     return undefined;
   };
 
-  const city = setSelect(
-    "City",
-    [mapCity(payload.city), payload.city],
-    "City (entered)",
-  );
-  const vehicleType = setSelect(
-    "Vehicle Type",
-    [mapVehicleType(payload.vehicleType), payload.vehicleType],
-    "Vehicle Type (entered)",
-  );
-  const vehicleColor = setSelect(
-    "Vehicle Color",
-    [mapColor(payload.vehicleColor), payload.vehicleColor],
-    "Vehicle Color (entered)",
-  );
-  const transmission = setSelect(
-    "Transmission / Gear",
-    [mapTransmission(payload.transmission), payload.transmission],
-    "Transmission (entered)",
-  );
+  const city = setSelect("City", [mapCity(payload.city), payload.city]);
+  const vehicleType = setSelect("Vehicle Type", [
+    mapVehicleType(payload.vehicleType),
+    payload.vehicleType,
+  ]);
+  const vehicleColor = setSelect("Vehicle Color", [
+    mapColor(payload.vehicleColor),
+    payload.vehicleColor,
+  ]);
+  const transmission = setSelect("Transmission / Gear", [
+    mapTransmission(payload.transmission),
+    payload.transmission,
+  ]);
   const accidents = payload.accidents
-    ? setSelect(
-        "Accidents",
-        [mapAccidents(payload.accidents) ?? "", payload.accidents],
-        "Accidents (entered)",
-      )
+    ? setSelect("Accidents", [
+        mapAccidents(payload.accidents) ?? "",
+        payload.accidents,
+      ])
     : undefined;
-  const fuelType = setSelect(
-    "Fuel Type",
-    [payload.fuelType],
-    "Fuel Type (entered)",
-  );
-  const finance = setSelect("Finance", [payload.finance], "Finance (entered)");
+  const fuelType = setSelect("Fuel Type", [payload.fuelType]);
+  const finance = setSelect("Finance", [payload.finance]);
   const evBrand = setSelect(
     "Interested EV Brand",
     evBrandCandidates(payload.evBrand),
-    "Interested EV Brand (entered)",
   );
 
-  const { field: featuresField, unmatched: unmatchedFeatures } =
-    mapFeaturesToField(payload.features, choices["Features"] ?? []);
+  const { columnName: featuresColumnName, choices: featureChoices } =
+    resolveFeaturesColumn(choices);
 
-  if (unmatchedFeatures.length > 0) {
-    notes = appendNote(
-      notes,
-      `Features (not in Airtable list): ${unmatchedFeatures.join(", ")}`,
-    );
-  }
-
-  if (payload.city && mapCity(payload.city) === "Others" && payload.city !== "Others" && payload.city !== "Other") {
-    notes = appendNote(notes, `City (entered): ${payload.city}`);
-  }
+  const { field: featuresField } = mapFeaturesToField(
+    payload.features,
+    featureChoices,
+  );
 
   const entries: [string, unknown][] = [
     ["Full Name", payload.fullName.trim()],
@@ -440,7 +459,7 @@ export function buildAirtableFields(
     ["Transmission / Gear", transmission],
     ["Accidents", accidents],
     ["Fuel Type", fuelType],
-    ["Features", featuresField],
+    [featuresColumnName, featuresField],
     ["Interested EV Brand", evBrand],
     ["Finance", finance],
     ["Notes", notes || undefined],

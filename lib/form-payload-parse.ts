@@ -15,6 +15,8 @@ const FEATURE_FORM_KEYS = [
   "Features",
   "vehicleFeatures",
   "Vehicle Features",
+  "vehicle_features",
+  "feature",
 ] as const;
 
 const EV_BRAND_FORM_KEYS = [
@@ -57,14 +59,25 @@ function parseFeatureString(raw: string): string[] {
   return [trimmed];
 }
 
-/** Collect features from all alias keys (JSON array, comma list, or repeated fields). */
-export function parseFeaturesFromForm(form: FormData): string[] {
+async function entryToFeatureStrings(entry: FormDataEntryValue): Promise<string[]> {
+  if (typeof entry === "string") return parseFeatureString(entry);
+  if (entry instanceof Blob) {
+    try {
+      return parseFeatureString(await entry.text());
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/** Collect features from all alias keys (JSON array, comma list, repeated fields, or File/Blob parts). */
+export async function parseFeaturesFromForm(form: FormData): Promise<string[]> {
   const collected: string[] = [];
 
   for (const key of FEATURE_FORM_KEYS) {
     for (const entry of form.getAll(key)) {
-      if (typeof entry !== "string") continue;
-      collected.push(...parseFeatureString(entry));
+      collected.push(...(await entryToFeatureStrings(entry)));
     }
   }
 
