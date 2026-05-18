@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import {
   buildAirtableFields,
   createListingRecord,
-  getRecordAttachmentUrls,
+  getRecordAttachments,
   resolveFeaturesColumn,
   resolveTableTarget,
   setAttachmentUrls,
@@ -138,31 +138,29 @@ export async function handleVehicleListingSubmission(
         return;
       }
 
-      const failedFiles: File[] = [];
-
       for (const file of files) {
         try {
           await uploadAttachmentToField(recordId, fieldRef, file);
-        } catch {
-          failedFiles.push(file);
+        } catch (directErr) {
+          try {
+            const [url] = await publishFilesForAirtable([file], request);
+            let existing: Awaited<ReturnType<typeof getRecordAttachments>> = [];
+            try {
+              existing = await getRecordAttachments(recordId, fieldName);
+            } catch {
+              // Record read failed; still try URL-only upload.
+            }
+            await setAttachmentUrls(recordId, fieldName, [url], existing);
+          } catch (fallbackErr) {
+            const directMsg =
+              directErr instanceof Error ? directErr.message : "Upload failed";
+            const fallbackMsg =
+              fallbackErr instanceof Error
+                ? fallbackErr.message
+                : "Upload failed";
+            uploadFailures.push(`${file.name}: ${directMsg}; ${fallbackMsg}`);
+          }
         }
-      }
-
-      if (failedFiles.length === 0) return;
-
-      try {
-        const newUrls = await publishFilesForAirtable(failedFiles, request);
-        const existingUrls = await getRecordAttachmentUrls(recordId, fieldName);
-        await setAttachmentUrls(recordId, fieldName, [
-          ...existingUrls,
-          ...newUrls,
-        ]);
-      } catch (fallbackErr) {
-        const fallbackMsg =
-          fallbackErr instanceof Error ? fallbackErr.message : "Upload failed";
-        uploadFailures.push(
-          ...failedFiles.map((f) => `${f.name}: ${fallbackMsg}`),
-        );
       }
     };
 

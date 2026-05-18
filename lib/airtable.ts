@@ -675,10 +675,13 @@ export async function uploadAttachmentToField(
   }
 }
 
-export async function getRecordAttachmentUrls(
+export type AirtableAttachmentRef = { id?: string; url?: string };
+
+/** Existing attachments on a record (for merge-before-update). */
+export async function getRecordAttachments(
   recordId: string,
   fieldName: string,
-): Promise<string[]> {
+): Promise<AirtableAttachmentRef[]> {
   const { tableName } = await resolveTableTarget();
   const res = await fetch(
     `${AIRTABLE_API}/${baseId()}/${encodeURIComponent(tableName)}/${recordId}`,
@@ -686,7 +689,7 @@ export async function getRecordAttachmentUrls(
   );
 
   const data = (await res.json()) as {
-    fields?: Record<string, Array<{ url?: string }> | undefined>;
+    fields?: Record<string, Array<{ id?: string; url?: string }> | undefined>;
     error?: { message: string };
   };
   if (!res.ok) {
@@ -697,17 +700,31 @@ export async function getRecordAttachmentUrls(
 
   const attachments = data.fields?.[fieldName];
   if (!Array.isArray(attachments)) return [];
-  return attachments
-    .map((a) => a.url)
-    .filter((url): url is string => Boolean(url));
+  return attachments.filter((a) => a.id || a.url);
+}
+
+function attachmentPayload(
+  existing: AirtableAttachmentRef[],
+  newUrls: string[],
+): Array<{ id: string } | { url: string }> {
+  const payload: Array<{ id: string } | { url: string }> = [];
+  for (const item of existing) {
+    if (item.id) payload.push({ id: item.id });
+    else if (item.url) payload.push({ url: item.url });
+  }
+  for (const url of newUrls) {
+    payload.push({ url });
+  }
+  return payload;
 }
 
 export async function setAttachmentUrls(
   recordId: string,
   fieldName: string,
   urls: string[],
+  existing: AirtableAttachmentRef[] = [],
 ): Promise<void> {
-  if (urls.length === 0) return;
+  if (urls.length === 0 && existing.length === 0) return;
 
   const { tableName } = await resolveTableTarget();
   const res = await fetch(
@@ -717,7 +734,7 @@ export async function setAttachmentUrls(
       headers: authHeaders(),
       body: JSON.stringify({
         fields: {
-          [fieldName]: urls.map((url) => ({ url })),
+          [fieldName]: attachmentPayload(existing, urls),
         },
       }),
     },
