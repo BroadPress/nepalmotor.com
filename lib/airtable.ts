@@ -225,8 +225,8 @@ function mapTransmission(value: string): string {
   return allowed.has(mapped) ? mapped : "Semi Automatic";
 }
 
-/** Must match Single select options on Airtable field "Interested EV Brand". */
-const AIRTABLE_EV_BRANDS = new Set([
+/** Short labels (Hein test base): BYD, Tesla, … */
+const AIRTABLE_EV_BRANDS_SHORT = new Set([
   "BYD",
   "Tesla",
   "Nissan",
@@ -237,18 +237,70 @@ const AIRTABLE_EV_BRANDS = new Set([
   "Other/undecide",
 ]);
 
+/** Production / client base model names on "Interested EV Brand". */
+const AIRTABLE_EV_MODELS = [
+  "Tata Nexon EV",
+  "Tata Tigor EV",
+  "Tata Punch EV",
+  "BYD Atto 3",
+  "BYD Dolphin",
+  "BYD e6",
+  "MG ZS EV",
+  "MG4 EV",
+  "MG S5 EV",
+  "Neta V",
+  "Neta U",
+  "Neta X",
+  "Hyundai Kona Electric",
+  "Hyundai Ioniq 5",
+  "Hyundai Creta EV",
+  "Kia EV6",
+  "Kia EV9",
+  "Kia Niro EV",
+  "I need suggestion",
+  "Other",
+] as const;
+
+const EV_FORM_TO_MODEL: Record<string, string> = {
+  BYD: "BYD Atto 3",
+  MG: "MG ZS EV",
+  Nissan: "Other",
+  Hyundai: "Hyundai Kona Electric",
+  Tata: "Tata Nexon EV",
+  Mahindra: "Other",
+  Tesla: "Other",
+};
+
+function evBrandFormat(): "short" | "detailed" {
+  const raw = process.env["AIRTABLE_EV_BRAND_FORMAT"]?.trim().toLowerCase();
+  return raw === "short" ? "short" : "detailed";
+}
+
 function mapEvBrand(brand: string): {
   interested: string;
   other?: string;
 } {
   const value = brand.trim();
+
   if (value === "Other / undecided") {
-    return { interested: "Other/undecide" };
+    return {
+      interested:
+        evBrandFormat() === "short" ? "Other/undecide" : "I need suggestion",
+    };
   }
-  if (AIRTABLE_EV_BRANDS.has(value)) {
+
+  if (evBrandFormat() === "short") {
+    if (AIRTABLE_EV_BRANDS_SHORT.has(value)) return { interested: value };
+    return { interested: "Other/undecide", other: value };
+  }
+
+  if ((AIRTABLE_EV_MODELS as readonly string[]).includes(value)) {
     return { interested: value };
   }
-  return { interested: "Other/undecide", other: value };
+  if (EV_FORM_TO_MODEL[value]) {
+    return { interested: EV_FORM_TO_MODEL[value] };
+  }
+  return { interested: "Other", other: value };
 }
 
 function splitFeatures(features: string[]): {
