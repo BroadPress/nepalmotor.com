@@ -97,6 +97,19 @@ async function fetchTablesMeta(): Promise<AirtableTableMeta[]> {
   };
 
   if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error(
+        "Airtable base not found (404). Check AIRTABLE_BASE_ID is the app… id from your base URL " +
+          "(not a table id tbl…). Ensure your token has access to this base and includes " +
+          "schema.bases:read scope.",
+      );
+    }
+    if (res.status === 403) {
+      throw new Error(
+        "Airtable denied access (403). Recreate your token with data.records:read/write and " +
+          "schema.bases:read, and grant access to this base.",
+      );
+    }
     throw new Error(data.error?.message ?? `Airtable meta error (${res.status})`);
   }
 
@@ -190,13 +203,8 @@ function mapColor(color: string): string {
 
 function mapAccidents(value: string): string | undefined {
   if (!value) return undefined;
-  const map: Record<string, string> = {
-    None: "No",
-    Minor: "Few times",
-    Major: "Many times",
-    "Prefer not to say": "I don't know",
-  };
-  return map[value] ?? value;
+  // Same labels as the website form — add these options on Airtable "Accidents"
+  return value.trim();
 }
 
 function mapTransmission(value: string): string {
@@ -209,51 +217,30 @@ function mapTransmission(value: string): string {
   return allowed.has(mapped) ? mapped : "Semi Automatic";
 }
 
-const EV_CHOICES = [
-  "Tata Nexon EV ",
-  "Tata Tigor EV ",
-  "Tata Punch EV ",
-  "BYD Atto 3 ",
-  "BYD Dolphin ",
-  "BYD e6 ",
-  "MG ZS EV ",
-  "MG4 EV ",
-  "MG S5 EV ",
-  "Neta V ",
-  "Neta U ",
-  "Neta X ",
-  "Hyundai Kona Electric ",
-  "Hyundai Ioniq 5 ",
-  "Hyundai Creta EV ",
-  "Kia EV6 ",
-  "Kia EV9 ",
-  "Kia Niro EV",
-  "I need suggestion",
-  "Other",
-] as const;
+/** Must match Single select options on Airtable field "Interested EV Brand". */
+const AIRTABLE_EV_BRANDS = new Set([
+  "BYD",
+  "Tesla",
+  "Nissan",
+  "Hyundai",
+  "MG",
+  "Tata",
+  "Mahindra",
+  "Other/undecide",
+]);
 
 function mapEvBrand(brand: string): {
   interested: string;
   other?: string;
 } {
-  if ((EV_CHOICES as readonly string[]).includes(brand)) {
-    return { interested: brand };
+  const value = brand.trim();
+  if (value === "Other / undecided") {
+    return { interested: "Other/undecide" };
   }
-  if (brand === "Other / undecided") {
-    return { interested: "I need suggestion" };
+  if (AIRTABLE_EV_BRANDS.has(value)) {
+    return { interested: value };
   }
-  const byPrefix: Record<string, string> = {
-    BYD: "BYD Atto 3 ",
-    MG: "MG ZS EV ",
-    Nissan: "Other",
-    Hyundai: "Hyundai Kona Electric ",
-    Tata: "Tata Nexon EV ",
-    Mahindra: "Other",
-  };
-  if (byPrefix[brand]) {
-    return { interested: byPrefix[brand] };
-  }
-  return { interested: "Other", other: brand };
+  return { interested: "Other/undecide", other: value };
 }
 
 function splitFeatures(features: string[]): {
@@ -307,7 +294,7 @@ export function buildAirtableFields(payload: ListingPayload): Record<string, unk
     "Vehicle Model": payload.vehicleModel.trim(),
     "Vehicle Color": mapColor(payload.vehicleColor),
     "KM Driven": Number.isFinite(km) ? km : undefined,
-    "Interested EV Brand": ev.interested,
+    "Interested EV Brand": ev.interested.trim(),
     Finance: payload.finance,
     "Transmission / Gear": mapTransmission(payload.transmission),
     "Fuel Type": payload.fuelType,
