@@ -637,7 +637,9 @@ export async function uploadAttachmentToField(
   fieldIdOrName: string,
   file: File,
 ): Promise<void> {
-  if (file.size === 0) return;
+  if (file.size === 0) {
+    throw new Error(`${file.name || "File"} is empty (0 bytes)`);
+  }
   if (file.size > ATTACHMENT_MAX_BYTES) {
     throw new Error(
       `${file.name} is too large (max ${ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB per file)`,

@@ -15,6 +15,7 @@ import {
 } from "@/lib/airtable-env";
 import { publishFilesForAirtable } from "@/lib/attachment-staging";
 import {
+  diagnosePhotoUploadForm,
   parseAttachmentsFromForm,
   parseEvBrandFromForm,
   parseFeaturesFromForm,
@@ -142,6 +143,14 @@ export async function handleVehicleListingSubmission(
         try {
           await uploadAttachmentToField(recordId, fieldRef, file);
         } catch (directErr) {
+          if (fieldId && fieldName && fieldRef === fieldId) {
+            try {
+              await uploadAttachmentToField(recordId, fieldName, file);
+              continue;
+            } catch {
+              /* try URL fallback below */
+            }
+          }
           try {
             const [url] = await publishFilesForAirtable([file], request);
             let existing: Awaited<ReturnType<typeof getRecordAttachments>> = [];
@@ -177,22 +186,28 @@ export async function handleVehicleListingSubmission(
       "no photo field in Airtable",
     );
 
-    if (uploadFailures.length > 0) {
-      return NextResponse.json({
-        ok: true,
-        recordId,
-        received: {
-          evBrand: payload.evBrand,
-          features: payload.features,
-          featuresAirtableColumn,
-          attachments: { documents: docFiles.length, photos: photoFiles.length },
-        },
-        warning: `Saved, but these files could not be uploaded: ${uploadFailures.join(", ")}`,
-      });
+    const photoDiagnostic = diagnosePhotoUploadForm(form, photoFiles.length);
+    const photoNames = new Set(photoFiles.map((f) => f.name));
+    const photoUploadFailed = uploadFailures.some((msg) => {
+      const name = msg.split(":")[0]?.trim();
+      return name && photoNames.has(name);
+    });
+
+    if (photoFiles.length > 0 && photoUploadFailed) {
+      photoDiagnostic.likelyFault = "airtable";
+      photoDiagnostic.hint =
+        "Photos reached the server but Airtable rejected the upload. Check API token (data.records:write), field name, and file size (max 5 MB).";
+    } else if (
+      photoFiles.length > 0 &&
+      !attachmentFieldNames.photos
+    ) {
+      photoDiagnostic.likelyFault = "server";
+      photoDiagnostic.hint =
+        "Photos were parsed but no photo attachment column was found in the Airtable table.";
     }
 
-    return NextResponse.json({
-      ok: true,
+    const responseBody = {
+      ok: true as const,
       recordId,
       received: {
         evBrand: payload.evBrand,
@@ -200,7 +215,17 @@ export async function handleVehicleListingSubmission(
         featuresAirtableColumn,
         attachments: { documents: docFiles.length, photos: photoFiles.length },
       },
-    });
+      photoUpload: photoDiagnostic,
+    };
+
+    if (uploadFailures.length > 0) {
+      return NextResponse.json({
+        ...responseBody,
+        warning: `Saved, but these files could not be uploaded: ${uploadFailures.join(", ")}`,
+      });
+    }
+
+    return NextResponse.json(responseBody);
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Failed to submit listing";

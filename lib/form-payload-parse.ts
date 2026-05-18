@@ -546,6 +546,110 @@ async function collectScannedUploadFiles(form: FormData): Promise<{
   return { documents, photos };
 }
 
+export type PhotoUploadFormDiagnostic = {
+  photoFieldKeysFound: string[];
+  entries: Array<{
+    key: string;
+    kind: "blob" | "string";
+    size?: number;
+    mime?: string;
+    name?: string;
+    issue?: string;
+  }>;
+  parsedPhotoCount: number;
+  /** Who should fix it when photos are missing. */
+  likelyFault?: "mobile" | "server" | "airtable";
+  hint?: string;
+};
+
+/** Inspect raw form parts to distinguish mobile format issues from server/Airtable failures. */
+export function diagnosePhotoUploadForm(
+  form: FormData,
+  parsedPhotoCount: number,
+): PhotoUploadFormDiagnostic {
+  const photoFieldKeysFound: string[] = [];
+  const entries: PhotoUploadFormDiagnostic["entries"] = [];
+
+  for (const [key, entry] of form.entries()) {
+    const knownPhoto = (PHOTO_FORM_KEYS as readonly string[]).includes(key);
+    const scannedPhoto = formKeyAttachmentKind(key) === "photo";
+    if (!knownPhoto && !scannedPhoto) continue;
+
+    photoFieldKeysFound.push(key);
+
+    if (entry instanceof Blob) {
+      const name = entry instanceof File ? entry.name : undefined;
+      entries.push({
+        key,
+        kind: "blob",
+        size: entry.size,
+        mime: entry.type || undefined,
+        name,
+        issue: entry.size === 0 ? "empty_file" : undefined,
+      });
+      continue;
+    }
+
+    if (typeof entry === "string") {
+      const trimmed = entry.trim();
+      let issue: string | undefined;
+      if (/^(file|ph|content|assets-library):\/\//i.test(trimmed)) {
+        issue = "local_uri_string";
+      } else if (trimmed.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(trimmed) as { uri?: string; url?: string };
+          const uri = parsed.uri ?? parsed.url;
+          if (typeof uri === "string" && !/^https?:\/\//i.test(uri)) {
+            issue = "local_uri_in_json";
+          } else if (!parsed.uri && !parsed.url && !("base64" in parsed)) {
+            issue = "json_without_bytes";
+          }
+        } catch {
+          issue = "invalid_json";
+        }
+      } else if (trimmed.length > 0 && trimmed.length < 64) {
+        issue = "short_string_not_base64";
+      }
+      entries.push({ key, kind: "string", issue });
+    }
+  }
+
+  const uniqueKeys = [...new Set(photoFieldKeysFound)];
+  let hint: string | undefined;
+  let likelyFault: PhotoUploadFormDiagnostic["likelyFault"];
+
+  if (
+    entries.some(
+      (e) => e.issue === "local_uri_in_json" || e.issue === "local_uri_string",
+    )
+  ) {
+    likelyFault = "mobile";
+    hint =
+      "Device file path was sent, not image bytes. Mobile must use multipart FormData.append('photos', { uri, name, type }) so RN uploads the file, or send base64 in JSON.";
+  } else if (entries.some((e) => e.issue === "empty_file")) {
+    likelyFault = "mobile";
+    hint =
+      "Photo part is 0 bytes (broken iOS URI or failed read). Fix image picker / appendUpload on mobile.";
+  } else if (uniqueKeys.length === 0 && parsedPhotoCount === 0) {
+    likelyFault = "mobile";
+    hint = "No photo field in request. Use form key 'photos' (repeat for each image).";
+  } else if (parsedPhotoCount === 0 && entries.length > 0) {
+    likelyFault = "mobile";
+    hint =
+      "Photo fields were sent but could not be parsed. Send multipart file bytes or base64, not a local path string.";
+  } else if (parsedPhotoCount > 0) {
+    likelyFault = undefined;
+  }
+
+  return {
+    photoFieldKeysFound: uniqueKeys,
+    entries,
+    parsedPhotoCount,
+    likelyFault,
+    hint,
+  };
+}
+
 /** Documents + photos from all known and discovered mobile/web form keys. */
 export async function parseAttachmentsFromForm(form: FormData): Promise<{
   documents: File[];
