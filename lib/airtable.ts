@@ -39,6 +39,7 @@ const FEATURE_ALIASES: Record<string, string> = {
   "leather seats": "Leather Seats",
   "reverse camera": "Backup Camera",
   "cruise control": "Cruise Control",
+  sunroof: "Sunroof",
 };
 
 export type ListingPayload = {
@@ -269,48 +270,39 @@ function splitFeatures(features: string[]): {
 export function buildAirtableFields(payload: ListingPayload): Record<string, unknown> {
   const year = parseInt(payload.year, 10);
   const km = parseInt(payload.kmDriven, 10);
-  const { airtable: featureTags, extra: extraFeatures } = splitFeatures(
-    payload.features,
-  );
+  const { airtable: featureTags } = splitFeatures(payload.features);
   const ev = mapEvBrand(payload.evBrand);
+  const accidents = mapAccidents(payload.accidents);
 
   let notes = payload.notes.trim();
-  if (extraFeatures.length > 0) {
-    const line = `Additional features: ${extraFeatures.join(", ")}`;
-    notes = notes ? `${notes}\n\n${line}` : line;
-  }
   if (payload.city && mapCity(payload.city) === "Others" && payload.city !== "Others") {
     const line = `City (entered): ${payload.city}`;
     notes = notes ? `${notes}\n\n${line}` : line;
   }
 
-  const fields: Record<string, unknown> = {
-    "Full Name": payload.fullName.trim(),
-    Phone: payload.phone.trim(),
-    City: mapCity(payload.city),
-    "Year of Manufacture": Number.isFinite(year) ? year : undefined,
-    "Vehicle Type": mapVehicleType(payload.vehicleType),
-    "Vehicle Brand": payload.vehicleBrand.trim(),
-    "Vehicle Model": payload.vehicleModel.trim(),
-    "Vehicle Color": mapColor(payload.vehicleColor),
-    "KM Driven": Number.isFinite(km) ? km : undefined,
-    "Interested EV Brand": ev.interested.trim(),
-    Finance: payload.finance,
-    "Transmission / Gear": mapTransmission(payload.transmission),
-    "Fuel Type": payload.fuelType,
-  };
-
-  if (payload.email.trim()) fields.Email = payload.email.trim();
-  if (ev.other) fields["Other EV Brand"] = ev.other;
-
-  const accidents = mapAccidents(payload.accidents);
-  if (accidents) fields.Accidents = accidents;
-
-  if (featureTags.length > 0) fields.Features = featureTags;
-  if (notes) fields.Notes = notes;
+  // Order matches the website / mobile form (EV brand, finance, notes last).
+  const entries: [string, unknown][] = [
+    ["Full Name", payload.fullName.trim()],
+    ["Email", payload.email.trim()],
+    ["Phone", payload.phone.trim()],
+    ["City", mapCity(payload.city)],
+    ["Year of Manufacture", Number.isFinite(year) ? year : undefined],
+    ["Vehicle Type", mapVehicleType(payload.vehicleType)],
+    ["Vehicle Model", payload.vehicleModel.trim()],
+    ["Vehicle Brand", payload.vehicleBrand.trim()],
+    ["Vehicle Color", mapColor(payload.vehicleColor)],
+    ["KM Driven", Number.isFinite(km) ? km : undefined],
+    ["Transmission / Gear", mapTransmission(payload.transmission)],
+    ["Accidents", accidents],
+    ["Fuel Type", payload.fuelType],
+    ["Features", featureTags.length > 0 ? featureTags : undefined],
+    ["Interested EV Brand", ev.interested.trim()],
+    ["Finance", payload.finance],
+    ["Notes", notes || undefined],
+  ];
 
   return Object.fromEntries(
-    Object.entries(fields).filter(([, v]) => v !== undefined && v !== ""),
+    entries.filter(([, v]) => v !== undefined && v !== ""),
   );
 }
 
