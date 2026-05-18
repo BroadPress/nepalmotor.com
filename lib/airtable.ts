@@ -675,6 +675,33 @@ export async function uploadAttachmentToField(
   }
 }
 
+export async function getRecordAttachmentUrls(
+  recordId: string,
+  fieldName: string,
+): Promise<string[]> {
+  const { tableName } = await resolveTableTarget();
+  const res = await fetch(
+    `${AIRTABLE_API}/${baseId()}/${encodeURIComponent(tableName)}/${recordId}`,
+    { headers: authHeaders() },
+  );
+
+  const data = (await res.json()) as {
+    fields?: Record<string, Array<{ url?: string }> | undefined>;
+    error?: { message: string };
+  };
+  if (!res.ok) {
+    throw new Error(
+      data.error?.message ?? `Failed to read record (${res.status})`,
+    );
+  }
+
+  const attachments = data.fields?.[fieldName];
+  if (!Array.isArray(attachments)) return [];
+  return attachments
+    .map((a) => a.url)
+    .filter((url): url is string => Boolean(url));
+}
+
 export async function setAttachmentUrls(
   recordId: string,
   fieldName: string,

@@ -9,6 +9,7 @@ import {
 } from "react";
 
 const BORDER = "#E0E0E0";
+const MAX_PHOTOS = 5;
 const TAG_BG = "#E8F4FC";
 const TAG_TEXT = "#0c4a6e";
 
@@ -415,6 +416,13 @@ export function ExchangeToEvForm() {
     });
   }, []);
 
+  const addPhotoFiles = useCallback((incoming: FileList | File[]) => {
+    const list = Array.from(incoming);
+    if (list.length === 0) return;
+    setPhotoFiles((prev) => [...prev, ...list].slice(0, MAX_PHOTOS));
+    if (photoInputRef.current) photoInputRef.current.value = "";
+  }, []);
+
   useEffect(() => {
     if (!featuresPickerOpen) return;
     const onDoc = (e: MouseEvent) => {
@@ -692,14 +700,18 @@ export function ExchangeToEvForm() {
           onDrop={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            const list = e.dataTransfer.files;
-            if (list?.length) setPhotoFiles(Array.from(list));
+            if (e.dataTransfer.files?.length) addPhotoFiles(e.dataTransfer.files);
           }}
         >
           <CloudIcon className="text-zinc-400" />
           <span className="text-[14px] text-zinc-600">
             Drop files here or{" "}
             <span className="text-blue-600 underline">browse</span>
+            {photoFiles.length < MAX_PHOTOS ? (
+              <span className="block text-[12px] text-zinc-500">
+                Up to {MAX_PHOTOS} photos
+              </span>
+            ) : null}
           </span>
           <input
             ref={photoInputRef}
@@ -707,11 +719,16 @@ export function ExchangeToEvForm() {
             accept="image/*"
             className="sr-only"
             multiple
-            onChange={(e) =>
-              setPhotoFiles(e.target.files ? Array.from(e.target.files) : [])
-            }
+            onChange={(e) => {
+              if (e.target.files?.length) addPhotoFiles(e.target.files);
+            }}
           />
         </label>
+        {photoFiles.length >= MAX_PHOTOS ? (
+          <p className="text-[12px] text-zinc-500">
+            Maximum {MAX_PHOTOS} photos reached.
+          </p>
+        ) : null}
         <FilePreviewGrid files={photoFiles} onRemove={removePhotoFile} />
       </div>
 

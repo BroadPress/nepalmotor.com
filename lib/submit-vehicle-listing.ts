@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   buildAirtableFields,
   createListingRecord,
+  getRecordAttachmentUrls,
   resolveFeaturesColumn,
   resolveTableTarget,
   setAttachmentUrls,
@@ -137,23 +138,31 @@ export async function handleVehicleListingSubmission(
         return;
       }
 
+      const failedFiles: File[] = [];
+
       for (const file of files) {
         try {
           await uploadAttachmentToField(recordId, fieldRef, file);
-        } catch (directErr) {
-          try {
-            const urls = await publishFilesForAirtable([file], request);
-            await setAttachmentUrls(recordId, fieldName, urls);
-          } catch (fallbackErr) {
-            const directMsg =
-              directErr instanceof Error ? directErr.message : "Upload failed";
-            const fallbackMsg =
-              fallbackErr instanceof Error
-                ? fallbackErr.message
-                : "Upload failed";
-            uploadFailures.push(`${file.name}: ${directMsg}; ${fallbackMsg}`);
-          }
+        } catch {
+          failedFiles.push(file);
         }
+      }
+
+      if (failedFiles.length === 0) return;
+
+      try {
+        const newUrls = await publishFilesForAirtable(failedFiles, request);
+        const existingUrls = await getRecordAttachmentUrls(recordId, fieldName);
+        await setAttachmentUrls(recordId, fieldName, [
+          ...existingUrls,
+          ...newUrls,
+        ]);
+      } catch (fallbackErr) {
+        const fallbackMsg =
+          fallbackErr instanceof Error ? fallbackErr.message : "Upload failed";
+        uploadFailures.push(
+          ...failedFiles.map((f) => `${f.name}: ${fallbackMsg}`),
+        );
       }
     };
 
