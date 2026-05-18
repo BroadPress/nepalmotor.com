@@ -185,13 +185,28 @@ export async function resolveTableTarget(): Promise<TableTarget> {
     if (names.length > 0) selectChoices[field.name] = names;
   }
 
-  const documentsField =
+  let documentsField =
     findAttachmentField("Upload Vehicle Document", "Vehicle Document") ??
     findAttachmentByKeyword("document");
-  const photosField =
+  let photosField =
     findAttachmentField("Upload Vehicle Photo", "Vehicle Photo") ??
     findAttachmentByKeyword("photo") ??
     findAttachmentByKeyword("image");
+
+  if (
+    documentsField &&
+    photosField &&
+    documentsField.id === photosField.id
+  ) {
+    photosField =
+      findAttachmentField("Upload Vehicle Photo", "Vehicle Photo") ??
+      attachmentFields.find(
+        (f) =>
+          f.id !== documentsField?.id &&
+          /photo|image/i.test(f.name) &&
+          !/document/i.test(f.name),
+      );
+  }
 
   tableTargetCache = {
     tableName: table.name,

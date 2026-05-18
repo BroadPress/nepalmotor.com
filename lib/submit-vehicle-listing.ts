@@ -14,12 +14,12 @@ import {
 } from "@/lib/airtable-env";
 import { publishFilesForAirtable } from "@/lib/attachment-staging";
 import {
-  parseDocumentFilesFromForm,
+  parseAttachmentsFromForm,
   parseEvBrandFromForm,
   parseFeaturesFromForm,
   parseFinanceFromForm,
   parseNotesFromForm,
-  parsePhotoFilesFromForm,
+  readSubmissionFormData,
   reconcileFinanceAndNotes,
 } from "@/lib/form-payload-parse";
 
@@ -98,7 +98,7 @@ export async function handleVehicleListingSubmission(
 
   let form: FormData;
   try {
-    form = await request.formData();
+    form = await readSubmissionFormData(request);
   } catch {
     return validationError("Invalid form data");
   }
@@ -108,8 +108,8 @@ export async function handleVehicleListingSubmission(
     return validationError("Please fill in all required fields.");
   }
 
-  const docFiles = await parseDocumentFilesFromForm(form);
-  const photoFiles = await parsePhotoFilesFromForm(form);
+  const { documents: docFiles, photos: photoFiles } =
+    await parseAttachmentsFromForm(form);
 
   try {
     const tableTarget = await resolveTableTarget();
@@ -178,6 +178,7 @@ export async function handleVehicleListingSubmission(
           evBrand: payload.evBrand,
           features: payload.features,
           featuresAirtableColumn,
+          attachments: { documents: docFiles.length, photos: photoFiles.length },
         },
         warning: `Saved, but these files could not be uploaded: ${uploadFailures.join(", ")}`,
       });
@@ -190,6 +191,7 @@ export async function handleVehicleListingSubmission(
         evBrand: payload.evBrand,
         features: payload.features,
         featuresAirtableColumn,
+        attachments: { documents: docFiles.length, photos: photoFiles.length },
       },
     });
   } catch (err) {
